@@ -1,0 +1,16 @@
+# Build outputs
+**/target/
+**/dist/
+**/build/
+**/node_modules/
+
+# Env
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
