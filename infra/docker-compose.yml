@@ -20,6 +20,8 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
     ports:
       - "${KEYCLOAK_PORT:-8081}:8080"
     volumes:
@@ -36,7 +38,7 @@ services:
       DB_NAME: ${POSTGRES_DB:-nba}
       DB_USER: ${POSTGRES_USER:-nba}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-nbapass}
-      JWT_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-nba}
+      JWT_ISSUER_URI: http://host.docker.internal:8081/realms/nba
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:

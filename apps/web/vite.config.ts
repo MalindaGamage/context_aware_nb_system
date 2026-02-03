@@ -26,7 +26,12 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      "/api": "http://localhost:8080"
+      "/api": "http://localhost:8080",
+      "/kc": {
+        target: "http://host.docker.internal:8081",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/kc/, "")
+      }
     }
   }
 });

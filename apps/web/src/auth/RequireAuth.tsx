@@ -8,12 +8,15 @@ type Props = {
 
 export default function RequireAuth({ roles, children }: Props) {
   const { token, role } = useAuth();
+  // Avoid redirecting during the login state update by falling back to persisted values.
+  const effectiveToken = token ?? localStorage.getItem("nba_token");
+  const effectiveRole = role ?? localStorage.getItem("nba_role");
 
-  if (!token) {
+  if (!effectiveToken) {
     return <Navigate to="/login" replace />;
   }
 
-  if (role && roles.length > 0 && !roles.includes(role)) {
+  if (effectiveRole && roles.length > 0 && !roles.includes(effectiveRole)) {
     return <Navigate to="/login" replace />;
   }
 

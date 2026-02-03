@@ -14,6 +14,8 @@ export default function LoginPage() {
     setStatus("Signing in...");
     try {
       await login(username, password);
+      console.log("nba_token:", localStorage.getItem("nba_token"));
+      console.log("nba_role:", localStorage.getItem("nba_role"));
       setStatus("Signed in");
       if (username.startsWith("admin")) navigate("/admin");
       else if (username.startsWith("manager")) navigate("/manager");
