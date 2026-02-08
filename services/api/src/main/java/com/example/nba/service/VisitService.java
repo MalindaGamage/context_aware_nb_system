@@ -1,0 +1,155 @@
+package com.example.nba.service;
+
+import com.example.nba.dto.CaptureVisitGpsRequest;
+import com.example.nba.dto.CreateVisitRequest;
+import com.example.nba.dto.UpdateVisitRequest;
+import com.example.nba.dto.VisitResponse;
+import com.example.nba.entity.Visit;
+import com.example.nba.repository.VisitRepository;
+import java.time.OffsetDateTime;
+import java.util.Map;
+import java.util.UUID;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.Point;
+import org.locationtech.jts.geom.PrecisionModel;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+@Service
+public class VisitService {
+  private static final GeometryFactory GEOMETRY_FACTORY = new GeometryFactory(new PrecisionModel(), 4326);
+
+  private final VisitRepository visitRepository;
+  private final DoctorService doctorService;
+  private final AuditLogService auditLogService;
+
+  public VisitService(VisitRepository visitRepository,
+                      DoctorService doctorService,
+                      AuditLogService auditLogService) {
+    this.visitRepository = visitRepository;
+    this.doctorService = doctorService;
+    this.auditLogService = auditLogService;
+  }
+
+  @Transactional
+  public VisitResponse createVisit(CreateVisitRequest request, UUID actorUserId, boolean enforceMrScope) {
+    doctorService.validateDoctorAccess(request.doctorId(), actorUserId, enforceMrScope);
+
+    Visit visit = new Visit();
+    visit.setId(UUID.randomUUID());
+    visit.setDoctorId(request.doctorId());
+    visit.setUserId(actorUserId);
+    visit.setVisitTime(request.visitTime());
+    visit.setOutcome(request.outcome().trim());
+    visit.setNotes(normalizeNotes(request.notes()));
+    visit.setFollowUpRequired(request.followUpRequired());
+    visit.setCreatedAt(OffsetDateTime.now());
+    visitRepository.save(visit);
+
+    auditLogService.log(actorUserId, "VISIT_CREATED", "VISIT", visit.getId(), Map.of(
+        "doctorId", visit.getDoctorId().toString(),
+        "followUpRequired", visit.isFollowUpRequired(),
+        "outcome", visit.getOutcome()
+    ));
+
+    return toResponse(visit);
+  }
+
+  public Page<VisitResponse> listMyVisits(UUID actorUserId, Pageable pageable) {
+    return visitRepository.findByUserIdOrderByVisitTimeDesc(actorUserId, pageable).map(this::toResponse);
+  }
+
+  public Page<VisitResponse> listDoctorVisits(UUID doctorId, UUID actorUserId, boolean enforceMrScope, Pageable pageable) {
+    doctorService.validateDoctorAccess(doctorId, actorUserId, enforceMrScope);
+    return visitRepository.findByDoctorIdOrderByVisitTimeDesc(doctorId, pageable).map(this::toResponse);
+  }
+
+  public VisitResponse getVisit(UUID visitId, UUID actorUserId, boolean mrOnlyOwnVisits) {
+    Visit visit = resolveVisit(visitId, actorUserId, mrOnlyOwnVisits);
+    return toResponse(visit);
+  }
+
+  @Transactional
+  public VisitResponse updateVisit(UUID visitId, UpdateVisitRequest request, UUID actorUserId, boolean mrOnlyOwnVisits) {
+    Visit visit = resolveVisit(visitId, actorUserId, mrOnlyOwnVisits);
+    String oldOutcome = visit.getOutcome();
+    boolean oldFollowUp = visit.isFollowUpRequired();
+    String oldNotes = visit.getNotes();
+
+    visit.setVisitTime(request.visitTime());
+    visit.setOutcome(request.outcome().trim());
+    visit.setNotes(normalizeNotes(request.notes()));
+    visit.setFollowUpRequired(request.followUpRequired());
+    visitRepository.save(visit);
+
+    auditLogService.log(actorUserId, "VISIT_UPDATED", "VISIT", visit.getId(), Map.of(
+        "oldOutcome", oldOutcome,
+        "newOutcome", visit.getOutcome(),
+        "oldFollowUpRequired", oldFollowUp,
+        "newFollowUpRequired", visit.isFollowUpRequired(),
+        "oldNotes", oldNotes == null ? "" : oldNotes,
+        "newNotes", visit.getNotes() == null ? "" : visit.getNotes()
+    ));
+
+    return toResponse(visit);
+  }
+
+  @Transactional
+  public VisitResponse captureGps(UUID visitId,
+                                  CaptureVisitGpsRequest request,
+                                  UUID actorUserId,
+                                  boolean mrOnlyOwnVisits) {
+    if (!request.optIn()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "GPS capture requires opt-in");
+    }
+    if (request.lat() < -90 || request.lat() > 90 || request.lon() < -180 || request.lon() > 180) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid latitude/longitude");
+    }
+
+    Visit visit = resolveVisit(visitId, actorUserId, mrOnlyOwnVisits);
+    Point point = GEOMETRY_FACTORY.createPoint(new org.locationtech.jts.geom.Coordinate(request.lon(), request.lat()));
+    visit.setLocation(point);
+    visitRepository.save(visit);
+
+    auditLogService.log(actorUserId, "VISIT_GPS_CAPTURED", "VISIT", visit.getId(), Map.of(
+        "lat", request.lat(),
+        "lon", request.lon()
+    ));
+    return toResponse(visit);
+  }
+
+  private Visit resolveVisit(UUID visitId, UUID actorUserId, boolean mrOnlyOwnVisits) {
+    if (mrOnlyOwnVisits) {
+      return visitRepository.findByIdAndUserId(visitId, actorUserId)
+          .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Visit not found"));
+    }
+    return visitRepository.findById(visitId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Visit not found"));
+  }
+
+  private String normalizeNotes(String notes) {
+    if (notes == null) {
+      return null;
+    }
+    String trimmed = notes.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private VisitResponse toResponse(Visit visit) {
+    return new VisitResponse(
+        visit.getId(),
+        visit.getDoctorId(),
+        visit.getUserId(),
+        visit.getVisitTime(),
+        visit.getOutcome(),
+        visit.getNotes(),
+        visit.isFollowUpRequired(),
+        visit.getLocation() != null,
+        visit.getCreatedAt()
+    );
+  }
+}

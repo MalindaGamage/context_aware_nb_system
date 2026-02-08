@@ -16,10 +16,12 @@ export type Territory = {
 
 export type PageResponse<T> = {
   content: T[];
-  totalElements: number;
-  totalPages: number;
-  number: number;
-  size: number;
+  meta: {
+    page: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+  };
 };
 
 export type UserSummary = {
@@ -57,6 +59,54 @@ export type CreateTerritoryRequest = {
 export type AssignTerritoryRequest = {
   territoryId: string;
   startsOn?: string;
+};
+
+export type Visit = {
+  id: string;
+  doctorId: string;
+  userId: string;
+  visitTime: string;
+  outcome: string;
+  notes: string | null;
+  followUpRequired: boolean;
+  gpsCaptured: boolean;
+  createdAt: string;
+};
+
+export type CreateVisitRequest = {
+  doctorId: string;
+  visitTime: string;
+  outcome: string;
+  notes?: string;
+  followUpRequired: boolean;
+};
+
+export type CaptureVisitGpsRequest = {
+  lat: number;
+  lon: number;
+  optIn: boolean;
+};
+
+export type RecommendationDriver = {
+  key: string;
+  value: string;
+  contribution: number;
+};
+
+export type NbaRecommendation = {
+  recommendationId: string;
+  doctorId: string;
+  doctorName: string;
+  specialty: string | null;
+  tier: string | null;
+  priorityScore: number;
+  score: number;
+  explanation: string;
+  drivers: RecommendationDriver[];
+};
+
+export type NbaNextResponse = {
+  recommendations: NbaRecommendation[];
 };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -275,4 +325,58 @@ export async function fetchSecurePing(token: string) {
   });
   if (!res.ok) throw new Error("Ping failed");
   return await res.text();
+}
+
+export async function createVisit(token: string, request: CreateVisitRequest) {
+  const res = await fetch(`${apiBase}/visits`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create visit");
+  return (await res.json()) as Visit;
+}
+
+export async function updateVisit(token: string, visitId: string, request: Omit<CreateVisitRequest, "doctorId">) {
+  const res = await fetch(`${apiBase}/visits/${visitId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update visit");
+  return (await res.json()) as Visit;
+}
+
+export async function fetchDoctorVisits(token: string, doctorId: string, page = 0, size = 20) {
+  const res = await fetch(`${apiBase}/doctors/${doctorId}/visits?page=${page}&size=${size}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load visit history");
+  return (await res.json()) as PageResponse<Visit>;
+}
+
+export async function fetchMyVisits(token: string, page = 0, size = 20) {
+  const res = await fetch(`${apiBase}/visits?page=${page}&size=${size}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load visits");
+  return (await res.json()) as PageResponse<Visit>;
+}
+
+export async function captureVisitGps(token: string, visitId: string, request: CaptureVisitGpsRequest) {
+  const res = await fetch(`${apiBase}/visits/${visitId}/gps`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to capture GPS");
+  return (await res.json()) as Visit;
+}
+
+export async function fetchNbaNext(token: string, limit = 5) {
+  const res = await fetch(`${apiBase}/nba/next?limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load recommendations");
+  return (await res.json()) as NbaNextResponse;
 }

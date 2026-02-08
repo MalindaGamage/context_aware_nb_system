@@ -1,6 +1,7 @@
 package com.example.nba.spec;
 
 import com.example.nba.entity.Doctor;
+import java.util.Collection;
 import java.util.UUID;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -17,5 +18,9 @@ public final class DoctorSpecifications {
 
   public static Specification<Doctor> hasTerritory(UUID territoryId) {
     return (root, query, cb) -> territoryId == null ? null : cb.equal(root.get("territoryId"), territoryId);
+  }
+
+  public static Specification<Doctor> inTerritories(Collection<UUID> territoryIds) {
+    return (root, query, cb) -> territoryIds == null ? null : root.get("territoryId").in(territoryIds);
   }
 }

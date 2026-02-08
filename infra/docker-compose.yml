@@ -39,6 +39,8 @@ services:
       DB_USER: ${POSTGRES_USER:-nba}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-nbapass}
       JWT_ISSUER_URI: http://host.docker.internal:8081/realms/nba
+      RECOMMENDER_BASE_URL: http://recommender:8000
+      RECOMMENDER_TIMEOUT_MS: 1800
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:

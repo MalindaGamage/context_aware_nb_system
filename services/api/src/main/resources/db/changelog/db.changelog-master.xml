@@ -12,4 +12,8 @@
     <changeSet id="002-seed-roles" author="codex">
         <sqlFile path="db/changelog/002_seed.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="003-recommendation-factors" author="codex">
+        <sqlFile path="db/changelog/003_recommendation_factors.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

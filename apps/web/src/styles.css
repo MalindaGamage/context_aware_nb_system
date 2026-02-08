@@ -308,6 +308,37 @@ button.accent {
   padding: 12px;
 }
 
+.nba-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.nba-main {
+  display: grid;
+  gap: 6px;
+}
+
+.nba-drivers {
+  display: grid;
+  gap: 8px;
+}
+
+.nba-driver {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #cbd5f5;
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: white;
+}
+
 .profile-card {
   align-items: start;
 }
@@ -348,6 +379,9 @@ button.accent {
   .table-row,
   .profile-card {
     flex-direction: column;
+  }
+  .nba-row {
+    grid-template-columns: 1fr;
   }
   .row-actions.wrap {
     justify-content: flex-start;

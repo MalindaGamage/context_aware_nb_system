@@ -57,8 +57,11 @@ public class UserService {
 
   public List<UserSummaryResponse> listMrSummaries() {
     List<User> users = userRepository.findByRole(ROLE_MR);
+    LocalDate today = LocalDate.now();
     Map<UUID, List<TerritoryAssignment>> assignmentsByUser = territoryAssignmentRepository.findAll()
         .stream()
+        .filter(assignment -> !assignment.getStartsOn().isAfter(today))
+        .filter(assignment -> assignment.getEndsOn() == null || !assignment.getEndsOn().isBefore(today))
         .collect(Collectors.groupingBy(TerritoryAssignment::getUserId));
 
     Map<UUID, TerritoryResponse> territories = territoryRepository.findAll()
@@ -84,9 +87,9 @@ public class UserService {
         .stream()
         .collect(Collectors.toMap(t -> t.getId(), territoryService::toResponse));
 
-    return territoryAssignmentRepository.findByUserId(userId)
+    return territoryAssignmentRepository.findActiveTerritoryIdsByUserId(userId)
         .stream()
-        .map(a -> territories.get(a.getTerritoryId()))
+        .map(territories::get)
         .filter(t -> t != null)
         .collect(Collectors.toList());
   }

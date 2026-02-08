@@ -28,4 +28,26 @@ public interface DoctorRepository extends JpaRepository<Doctor, UUID>, JpaSpecif
       LIMIT :limit
       """, nativeQuery = true)
   List<Doctor> findNearby(@Param("lat") double lat, @Param("lon") double lon, @Param("radiusMeters") double radiusMeters, @Param("limit") int limit);
+
+  @Query(value = """
+      SELECT * FROM doctors
+      WHERE location IS NOT NULL
+        AND territory_id IN (:territoryIds)
+        AND ST_DWithin(
+          location::geography,
+          ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+          :radiusMeters
+        )
+      ORDER BY ST_Distance(
+          location::geography,
+          ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+      )
+      LIMIT :limit
+      """, nativeQuery = true)
+  List<Doctor> findNearbyInTerritories(
+      @Param("territoryIds") List<UUID> territoryIds,
+      @Param("lat") double lat,
+      @Param("lon") double lon,
+      @Param("radiusMeters") double radiusMeters,
+      @Param("limit") int limit);
 }

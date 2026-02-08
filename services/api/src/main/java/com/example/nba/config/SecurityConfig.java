@@ -1,19 +1,30 @@
 package com.example.nba.config;
 
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
@@ -44,6 +55,36 @@ public class SecurityConfig {
     JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
     converter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
     return converter;
+  }
+
+  @Bean
+  public NimbusJwtDecoder jwtDecoder(
+      @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
+      @Value("${security.jwt.additional-issuers:http://host.docker.internal:8081/realms/nba,http://localhost:8081/realms/nba}")
+      String additionalIssuers) {
+    NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(issuerUri + "/protocol/openid-connect/certs").build();
+
+    Set<String> trustedIssuers = new LinkedHashSet<>();
+    trustedIssuers.add(issuerUri);
+    trustedIssuers.addAll(Stream.of(additionalIssuers.split(","))
+        .map(String::trim)
+        .filter(value -> !value.isBlank())
+        .collect(Collectors.toSet()));
+
+    OAuth2TokenValidator<Jwt> withTrustedIssuers = new JwtClaimValidator<>(JwtClaimNames.ISS, claim -> {
+      if (!(claim instanceof String iss)) {
+        return false;
+      }
+      return trustedIssuers.contains(iss);
+    });
+
+    OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
+        new JwtTimestampValidator(),
+        JwtValidators.createDefault(),
+        withTrustedIssuers);
+
+    decoder.setJwtValidator(validator);
+    return decoder;
   }
 
   @Bean

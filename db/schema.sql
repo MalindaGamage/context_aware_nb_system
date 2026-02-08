@@ -93,6 +93,15 @@ CREATE TABLE recommendations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE recommendation_factors (
+  id UUID PRIMARY KEY,
+  recommendation_id UUID NOT NULL REFERENCES recommendations(id) ON DELETE CASCADE,
+  factor_key VARCHAR(100) NOT NULL,
+  factor_value TEXT NOT NULL,
+  contribution NUMERIC(10, 4) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE recommendation_feedback (
   id UUID PRIMARY KEY,
   recommendation_id UUID NOT NULL REFERENCES recommendations(id) ON DELETE CASCADE,
@@ -115,3 +124,4 @@ CREATE INDEX idx_doctors_location ON doctors USING GIST (location);
 CREATE INDEX idx_territories_boundary ON territories USING GIST (boundary);
 CREATE INDEX idx_visits_doctor_time ON visits (doctor_id, visit_time DESC);
 CREATE INDEX idx_recommendations_user_time ON recommendations (user_id, created_at DESC);
+CREATE INDEX idx_recommendation_factors_recommendation_id ON recommendation_factors (recommendation_id);
