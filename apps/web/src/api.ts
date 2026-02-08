@@ -29,10 +29,60 @@ export type UserSummary = {
   territories: Territory[];
 };
 
+export type UserProfile = {
+  id: string;
+  fullName: string;
+  email: string;
+  active: boolean;
+  role: "MR" | "MANAGER" | "ADMIN";
+  territories: Territory[];
+};
+
+export type CreateUserRequest = {
+  fullName: string;
+  email: string;
+};
+
+export type UpdateUserRequest = {
+  fullName: string;
+  email: string;
+  active: boolean;
+};
+
+export type CreateTerritoryRequest = {
+  name: string;
+  code: string;
+};
+
+export type AssignTerritoryRequest = {
+  territoryId: string;
+  startsOn?: string;
+};
+
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
-const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL ?? "http://localhost:8081";
+const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL ?? "/kc";
 const realm = import.meta.env.VITE_KEYCLOAK_REALM ?? "nba";
 const clientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? "nba-api";
+
+function authHeaders(token: string) {
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
+
+function decodePrimaryRole(accessToken: string): string {
+  try {
+    const encodedPayload = accessToken.split(".")[1] ?? "";
+    const base64 = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(padded));
+    const roles: string[] = payload?.realm_access?.roles ?? [];
+    return roles.find((role) => ["ADMIN", "MANAGER", "MR"].includes(role)) ?? roles[0] ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export async function login(username: string, password: string) {
   const body = new URLSearchParams({
@@ -53,14 +103,7 @@ export async function login(username: string, password: string) {
   }
 
   const data = await res.json();
-  let realmRole = "";
-  try {
-    const payload = JSON.parse(atob(data.access_token.split(".")[1]));
-    realmRole = payload?.realm_access?.roles?.[0] ?? "";
-  } catch {
-    realmRole = "";
-  }
-  return { ...data, realm_role: realmRole };
+  return { ...data, realm_role: decodePrimaryRole(data.access_token) };
 }
 
 export async function fetchDoctors(token: string, params: { tier?: string; specialty?: string; territoryId?: string }) {
@@ -91,6 +134,34 @@ export async function fetchTerritories(token: string) {
   return (await res.json()) as Territory[];
 }
 
+export async function createTerritory(token: string, request: CreateTerritoryRequest) {
+  const res = await fetch(`${apiBase}/territories`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create territory");
+  return (await res.json()) as Territory;
+}
+
+export async function updateTerritory(token: string, territoryId: string, request: CreateTerritoryRequest) {
+  const res = await fetch(`${apiBase}/territories/${territoryId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update territory");
+  return (await res.json()) as Territory;
+}
+
+export async function deleteTerritory(token: string, territoryId: string) {
+  const res = await fetch(`${apiBase}/territories/${territoryId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to delete territory");
+}
+
 export async function fetchMyTerritories(token: string) {
   const res = await fetch(`${apiBase}/users/me/territories`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -105,6 +176,97 @@ export async function fetchMrSummaries(token: string) {
   });
   if (!res.ok) throw new Error("Failed to load summaries");
   return (await res.json()) as UserSummary[];
+}
+
+export async function fetchMrProfiles(token: string) {
+  const res = await fetch(`${apiBase}/users/mrs/profiles`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load MRs");
+  return (await res.json()) as UserProfile[];
+}
+
+export async function createMr(token: string, request: CreateUserRequest) {
+  const res = await fetch(`${apiBase}/users/mrs`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create MR");
+  return (await res.json()) as UserProfile;
+}
+
+export async function updateMr(token: string, userId: string, request: UpdateUserRequest) {
+  const res = await fetch(`${apiBase}/users/mrs/${userId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update MR");
+  return (await res.json()) as UserProfile;
+}
+
+export async function deleteMr(token: string, userId: string) {
+  const res = await fetch(`${apiBase}/users/mrs/${userId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to delete MR");
+}
+
+export async function fetchManagers(token: string) {
+  const res = await fetch(`${apiBase}/users/managers`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load managers");
+  return (await res.json()) as UserProfile[];
+}
+
+export async function createManager(token: string, request: CreateUserRequest) {
+  const res = await fetch(`${apiBase}/users/managers`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create manager");
+  return (await res.json()) as UserProfile;
+}
+
+export async function updateManager(token: string, userId: string, request: UpdateUserRequest) {
+  const res = await fetch(`${apiBase}/users/managers/${userId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update manager");
+  return (await res.json()) as UserProfile;
+}
+
+export async function deleteManager(token: string, userId: string) {
+  const res = await fetch(`${apiBase}/users/managers/${userId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to delete manager");
+}
+
+export async function assignTerritoryToMr(token: string, userId: string, request: AssignTerritoryRequest) {
+  const res = await fetch(`${apiBase}/users/${userId}/territories`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to assign territory");
+  return (await res.json()) as Territory[];
+}
+
+export async function unassignTerritoryFromMr(token: string, userId: string, territoryId: string) {
+  const res = await fetch(`${apiBase}/users/${userId}/territories/${territoryId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to remove territory assignment");
+  return (await res.json()) as Territory[];
 }
 
 export async function fetchSecurePing(token: string) {

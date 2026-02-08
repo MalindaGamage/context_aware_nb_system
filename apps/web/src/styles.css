@@ -284,6 +284,54 @@ button.accent {
   margin-bottom: 16px;
 }
 
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.table-list {
+  display: grid;
+  gap: 10px;
+}
+
+.table-row,
+.profile-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.profile-card {
+  align-items: start;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.row-actions.wrap {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chip-button {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 999px;
+  border: none;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .grid {
     grid-template-columns: 1fr;
@@ -296,5 +344,12 @@ button.accent {
     top: 0;
     z-index: 5;
     grid-auto-flow: column;
+  }
+  .table-row,
+  .profile-card {
+    flex-direction: column;
+  }
+  .row-actions.wrap {
+    justify-content: flex-start;
   }
 }

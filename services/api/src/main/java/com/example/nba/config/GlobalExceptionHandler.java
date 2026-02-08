@@ -3,6 +3,8 @@ package com.example.nba.config;
 import com.example.nba.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.OffsetDateTime;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -33,6 +35,28 @@ public class GlobalExceptionHandler {
         OffsetDateTime.now()
     );
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+  }
+
+  @ExceptionHandler(AuthenticationException.class)
+  public ResponseEntity<ErrorResponse> handleAuthentication(AuthenticationException ex, HttpServletRequest request) {
+    ErrorResponse body = new ErrorResponse(
+        HttpStatus.UNAUTHORIZED.name(),
+        "Authentication required",
+        request.getRequestURI(),
+        OffsetDateTime.now()
+    );
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
+  }
+
+  @ExceptionHandler(AccessDeniedException.class)
+  public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+    ErrorResponse body = new ErrorResponse(
+        HttpStatus.FORBIDDEN.name(),
+        "Access denied",
+        request.getRequestURI(),
+        OffsetDateTime.now()
+    );
+    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
   }
 
   @ExceptionHandler(Exception.class)

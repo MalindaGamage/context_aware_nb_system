@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TerritoryAssignmentRepository extends JpaRepository<TerritoryAssignment, UUID> {
   List<TerritoryAssignment> findByUserId(UUID userId);
+  List<TerritoryAssignment> findByTerritoryId(UUID territoryId);
+  boolean existsByUserIdAndTerritoryIdAndEndsOnIsNull(UUID userId, UUID territoryId);
 }

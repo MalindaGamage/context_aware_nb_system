@@ -1,14 +1,16 @@
-import { Card, SectionTitle } from "../ui/components";
+import { useAuth } from "../auth/AuthContext";
+import UserTerritoryAdmin from "./UserTerritoryAdmin";
 
 export default function AdminDashboard() {
+  const { token } = useAuth();
+  if (!token) return null;
+
   return (
-    <div className="page">
-      <SectionTitle title="Admin Console" subtitle="System configuration shell." />
-      <Card>
-        <p className="muted">
-          Admin tools will live here (user provisioning, territory setup, content governance).
-        </p>
-      </Card>
-    </div>
+    <UserTerritoryAdmin
+      token={token}
+      canManageManagers
+      title="Admin Console"
+      subtitle="Manage managers, MRs, territories, and assignments."
+    />
   );
 }
