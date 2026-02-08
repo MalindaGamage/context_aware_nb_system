@@ -31,6 +31,50 @@ export type UserSummary = {
   territories: Territory[];
 };
 
+export type CoverageTierAnalytics = {
+  tier: string;
+  doctorCount: number;
+  visitedDoctors: number;
+  totalVisits: number;
+  avgVisitsPerDoctor: number;
+  avgDaysSinceLastVisit: number | null;
+};
+
+export type MissedHighPriority = {
+  doctorId: string;
+  doctorName: string;
+  tier: string;
+  priorityScore: number;
+  territoryName: string | null;
+  lastVisitTime: string | null;
+};
+
+export type ComplianceAnalytics = {
+  totalFeedback: number;
+  doneCount: number;
+  skippedCount: number;
+  rescheduledCount: number;
+  overrideCount: number;
+  doneRate: number;
+  overrideRate: number;
+};
+
+export type MrComplianceRow = {
+  mrId: string;
+  mrName: string;
+  feedbackCount: number;
+  doneRate: number;
+  overrideRate: number;
+  skippedRate: number;
+};
+
+export type ManagerAnalyticsResponse = {
+  coverageByTier: CoverageTierAnalytics[];
+  missedHighPriority: MissedHighPriority[];
+  compliance: ComplianceAnalytics;
+  complianceByMr: MrComplianceRow[];
+};
+
 export type UserProfile = {
   id: string;
   fullName: string;
@@ -453,6 +497,22 @@ export async function fetchNbaNext(token: string, limit = 5) {
   });
   if (!res.ok) throw new Error("Failed to load recommendations");
   return (await res.json()) as NbaNextResponse;
+}
+
+export async function fetchManagerAnalytics(
+  token: string,
+  params: { mrId?: string; territoryId?: string; from?: string; to?: string }
+) {
+  const search = new URLSearchParams();
+  if (params.mrId) search.set("mrId", params.mrId);
+  if (params.territoryId) search.set("territoryId", params.territoryId);
+  if (params.from) search.set("from", params.from);
+  if (params.to) search.set("to", params.to);
+  const res = await fetch(`${apiBase}/analytics/manager?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load manager analytics");
+  return (await res.json()) as ManagerAnalyticsResponse;
 }
 
 export async function submitRecommendationFeedback(
