@@ -2,31 +2,38 @@ import { useEffect, useMemo, useState } from "react";
 import {
   captureVisitGps,
   createVisit,
-  fetchNbaNext,
   fetchDoctorVisits,
   fetchDoctors,
-  fetchNearbyDoctors,
   fetchMyTerritories,
+  fetchNearbyDoctors,
+  fetchNbaNext,
   fetchSecurePing,
+  submitRecommendationFeedback,
+  syncBatch,
   type Doctor,
   type NbaRecommendation,
+  type SyncConflict,
+  type SyncConflictStrategy,
+  type SyncFeedbackRequest,
+  type SyncVisitRequest,
   type Territory,
   type Visit,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import {
+  cacheNbaSnapshot,
+  getCachedNbaSnapshot,
+  getConflicts,
+  getQueuedFeedback,
+  getQueuedVisits,
+  queueFeedback,
+  queueSize,
+  queueVisit,
+  removeQueuedItems,
+  saveConflicts,
+} from "../offline/queue";
 import { Badge, Button, Card, Field, Pill, SectionTitle } from "../ui/components";
 import OfflineBanner from "../ui/OfflineBanner";
-
-const VISIT_DRAFTS_KEY = "nba_visit_drafts";
-
-type VisitDraft = {
-  id: string;
-  doctorId: string;
-  visitTime: string;
-  outcome: string;
-  notes: string;
-  followUpRequired: boolean;
-};
 
 export default function MrDashboard() {
   const { token, role } = useAuth();
@@ -42,15 +49,17 @@ export default function MrDashboard() {
   const [notes, setNotes] = useState("");
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [gpsOptIn, setGpsOptIn] = useState(false);
-  const [draftCount, setDraftCount] = useState(0);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [nextActions, setNextActions] = useState<NbaRecommendation[]>([]);
   const [nbaLoading, setNbaLoading] = useState(false);
+  const [syncStrategy, setSyncStrategy] = useState<SyncConflictStrategy>("SERVER_WINS");
+  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [status, setStatus] = useState("");
 
   useEffect(() => {
     if (!token) return;
     fetchMyTerritories(token).then(setMyTerritories).catch(() => setMyTerritories([]));
-    setDraftCount(loadDrafts().length);
+    void refreshOfflineState();
     void loadNextActions(token);
   }, [token]);
 
@@ -80,11 +89,33 @@ export default function MrDashboard() {
   useEffect(() => {
     const onOnline = () => {
       if (!token) return;
-      void syncDrafts(token);
+      void syncQueued(token, syncStrategy);
     };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
+  }, [token, syncStrategy]);
+
+  useEffect(() => {
+    if (!token) return;
+    if (!("serviceWorker" in navigator)) return;
+    void navigator.serviceWorker.ready.then(async (registration) => {
+      if ("sync" in registration) {
+        try {
+          await (registration as ServiceWorkerRegistration & {
+            sync: { register: (tag: string) => Promise<void> };
+          }).sync.register("nba-sync");
+        } catch {
+          // no-op
+        }
+      }
+    });
   }, [token]);
+
+  const refreshOfflineState = async () => {
+    const [size, pendingConflicts] = await Promise.all([queueSize(), getConflicts()]);
+    setPendingSyncCount(size);
+    setConflicts(pendingConflicts);
+  };
 
   const refreshSelectedDoctorVisits = async () => {
     if (!token || !selectedDoctor) return;
@@ -98,7 +129,10 @@ export default function MrDashboard() {
       setStatus("Outcome is required");
       return;
     }
-    const payload = {
+
+    const clientReferenceId = crypto.randomUUID();
+    const payload: SyncVisitRequest = {
+      clientReferenceId,
       doctorId: selectedDoctor.id,
       visitTime: new Date(visitTime).toISOString(),
       outcome: outcome.trim(),
@@ -107,9 +141,9 @@ export default function MrDashboard() {
     };
 
     if (!navigator.onLine) {
-      saveDraft(payload);
-      setDraftCount(loadDrafts().length);
-      setStatus("Offline: visit saved to drafts");
+      await queueVisit(payload);
+      await refreshOfflineState();
+      setStatus("Offline: visit queued for sync");
       return;
     }
 
@@ -121,44 +155,77 @@ export default function MrDashboard() {
       setStatus("Visit logged");
       await refreshSelectedDoctorVisits();
     } catch {
-      saveDraft(payload);
-      setDraftCount(loadDrafts().length);
-      setStatus("Network issue: visit saved to drafts");
+      await queueVisit(payload);
+      await refreshOfflineState();
+      setStatus("Network issue: visit queued for sync");
     }
   };
 
-  const syncDrafts = async (authToken: string) => {
-    const drafts = loadDrafts();
-    if (drafts.length === 0) return;
-    let synced = 0;
-    const pending: VisitDraft[] = [];
-
-    for (const draft of drafts) {
-      try {
-        await createVisit(authToken, {
-          doctorId: draft.doctorId,
-          visitTime: draft.visitTime,
-          outcome: draft.outcome,
-          notes: draft.notes,
-          followUpRequired: draft.followUpRequired,
-        });
-        synced += 1;
-      } catch {
-        pending.push(draft);
-      }
-    }
-
-    localStorage.setItem(VISIT_DRAFTS_KEY, JSON.stringify(pending));
-    setDraftCount(pending.length);
-    if (synced > 0) {
-      setStatus(`Synced ${synced} visit draft(s)`);
-      await refreshSelectedDoctorVisits();
-    }
-  };
-
-  const handleSyncDrafts = async () => {
+  const submitFeedback = async (
+    recommendation: NbaRecommendation,
+    feedback: Omit<SyncFeedbackRequest, "clientReferenceId" | "recommendationId">
+  ) => {
     if (!token) return;
-    await syncDrafts(token);
+    const queued: SyncFeedbackRequest = {
+      clientReferenceId: crypto.randomUUID(),
+      recommendationId: recommendation.recommendationId,
+      ...feedback,
+    };
+
+    if (!navigator.onLine) {
+      await queueFeedback(queued);
+      await refreshOfflineState();
+      setStatus("Offline: feedback queued for sync");
+      return;
+    }
+
+    try {
+      await submitRecommendationFeedback(token, recommendation.recommendationId, queued);
+      setStatus("Feedback submitted");
+    } catch {
+      await queueFeedback(queued);
+      await refreshOfflineState();
+      setStatus("Feedback queued due to network issue");
+    }
+  };
+
+  const syncQueued = async (authToken: string, strategy: SyncConflictStrategy) => {
+    const visits = await getQueuedVisits();
+    const feedback = await getQueuedFeedback();
+    if (visits.length === 0 && feedback.length === 0) {
+      await refreshOfflineState();
+      return;
+    }
+
+    try {
+      const result = await syncBatch(authToken, { strategy, visits, feedback });
+      const appliedVisitRefs = result.visitResults
+        .filter((item) => item.status === "APPLIED")
+        .map((item) => item.clientReferenceId);
+      const appliedFeedbackRefs = result.feedbackResults
+        .filter((item) => item.status === "APPLIED")
+        .map((item) => item.clientReferenceId);
+
+      await removeQueuedItems(appliedVisitRefs, appliedFeedbackRefs);
+      await saveConflicts(result.conflicts);
+      await refreshOfflineState();
+
+      const appliedCount = appliedVisitRefs.length + appliedFeedbackRefs.length;
+      if (result.conflicts.length > 0) {
+        setStatus(`Sync completed with ${result.conflicts.length} conflict(s)`);
+      } else {
+        setStatus(`Synced ${appliedCount} queued item(s)`);
+      }
+      await refreshSelectedDoctorVisits();
+      await loadNextActions(authToken);
+    } catch {
+      setStatus("Batch sync failed");
+    }
+  };
+
+  const handleSync = async () => {
+    if (!token) return;
+    await syncQueued(token, syncStrategy);
   };
 
   const handleCaptureGps = async (visitId: string) => {
@@ -225,11 +292,30 @@ export default function MrDashboard() {
   const loadNextActions = async (authToken: string) => {
     setNbaLoading(true);
     try {
+      if (!navigator.onLine) {
+        const cached = await getCachedNbaSnapshot();
+        if (cached) {
+          setNextActions(cached.recommendations);
+          setStatus(`Offline snapshot loaded (${new Date(cached.savedAt).toLocaleTimeString()})`);
+        } else {
+          setNextActions([]);
+          setStatus("Offline and no cached NBA snapshot");
+        }
+        return;
+      }
+
       const result = await fetchNbaNext(authToken, 5);
       setNextActions(result.recommendations);
+      await cacheNbaSnapshot(result.recommendations);
     } catch {
-      setNextActions([]);
-      setStatus("Failed to load next-best actions");
+      const cached = await getCachedNbaSnapshot();
+      if (cached) {
+        setNextActions(cached.recommendations);
+        setStatus("Using cached NBA snapshot");
+      } else {
+        setNextActions([]);
+        setStatus("Failed to load next-best actions");
+      }
     } finally {
       setNbaLoading(false);
     }
@@ -250,9 +336,9 @@ export default function MrDashboard() {
         </div>
         <div className="header-actions">
           <Badge label="Territory" value={myTerritories[0]?.name ?? "Unassigned"} />
-          <Badge label="Draft Visits" value={`${draftCount}`} />
-          <Button className="ghost" onClick={handleSyncDrafts}>
-            Sync Drafts
+          <Badge label="Pending Sync" value={`${pendingSyncCount}`} />
+          <Button className="ghost" onClick={handleSync}>
+            Sync Queue
           </Button>
           <Button className="ghost" onClick={handlePing}>
             Test API
@@ -261,12 +347,37 @@ export default function MrDashboard() {
       </div>
 
       <Card>
-        <SectionTitle title="What next?" subtitle="Ranked recommendations with explanation drivers." />
-        <div className="row-actions wrap">
+        <SectionTitle title="What next?" subtitle="Ranked recommendations with feedback actions." />
+        <div className="filters">
+          <Field label="Conflict Strategy">
+            <select value={syncStrategy} onChange={(e) => setSyncStrategy(e.target.value as SyncConflictStrategy)}>
+              <option value="SERVER_WINS">Server wins</option>
+              <option value="CLIENT_WINS">Client wins</option>
+            </select>
+          </Field>
           <Button className="ghost" onClick={handleRefreshNextActions}>
-            Refresh
+            Refresh Snapshot
+          </Button>
+          <Button className="ghost" onClick={handleSync}>
+            Retry Sync
           </Button>
         </div>
+
+        {conflicts.length > 0 && (
+          <div className="table-list">
+            <strong>Sync conflicts</strong>
+            {conflicts.map((conflict) => (
+              <div key={`${conflict.type}-${conflict.clientReferenceId}`} className="table-row">
+                <div>
+                  <strong>{conflict.type}</strong>
+                  <p className="muted">{conflict.reason}</p>
+                </div>
+                <Pill>{conflict.clientReferenceId}</Pill>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="table-list">
           {nbaLoading && <p className="muted">Loading recommendations...</p>}
           {!nbaLoading && nextActions.length === 0 && <p className="muted">No recommendations yet.</p>}
@@ -282,6 +393,47 @@ export default function MrDashboard() {
                   Tier {item.tier ?? "-"} | Priority {item.priorityScore} | Score {item.score.toFixed(2)}
                 </p>
                 <p>{item.explanation}</p>
+                <div className="row-actions wrap">
+                  <Button
+                    className="ghost"
+                    onClick={() => void submitFeedback(item, { status: "DONE", reason: "Completed as recommended" })}
+                  >
+                    Done
+                  </Button>
+                  <Button
+                    className="ghost"
+                    onClick={() => void submitFeedback(item, { status: "SKIPPED", reason: "Skipped in field" })}
+                  >
+                    Skipped
+                  </Button>
+                  <Button
+                    className="ghost"
+                    onClick={() =>
+                      void submitFeedback(item, {
+                        status: "RESCHEDULED",
+                        reason: "Rescheduled in field",
+                        rescheduledTo: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                      })
+                    }
+                  >
+                    Reschedule +1 day
+                  </Button>
+                  {selectedDoctor && selectedDoctor.id !== item.doctorId && (
+                    <Button
+                      className="ghost"
+                      onClick={() =>
+                        void submitFeedback(item, {
+                          status: "SKIPPED",
+                          reason: "Overridden to another doctor",
+                          overrideDoctorId: selectedDoctor.id,
+                          overrideNotes: `Override to ${selectedDoctor.fullName}`,
+                        })
+                      }
+                    >
+                      Override to selected doctor
+                    </Button>
+                  )}
+                </div>
               </div>
               <div className="nba-drivers">
                 {item.drivers.slice(0, 3).map((driver) => (
@@ -350,7 +502,7 @@ export default function MrDashboard() {
                 </div>
                 <p className="notes">{selectedDoctor.notes || "No notes yet."}</p>
 
-                <SectionTitle title="Log Visit" subtitle="Fast form with offline drafts." />
+                <SectionTitle title="Log Visit" subtitle="Offline queue enabled." />
                 <div className="inline-form">
                   <Field label="Visit Time">
                     <input type="datetime-local" value={visitTime} onChange={(e) => setVisitTime(e.target.value)} />
@@ -408,21 +560,4 @@ export default function MrDashboard() {
       </Card>
     </div>
   );
-}
-
-function loadDrafts(): VisitDraft[] {
-  const raw = localStorage.getItem(VISIT_DRAFTS_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as VisitDraft[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveDraft(draft: Omit<VisitDraft, "id">) {
-  const current = loadDrafts();
-  const next = [...current, { ...draft, id: crypto.randomUUID() }];
-  localStorage.setItem(VISIT_DRAFTS_KEY, JSON.stringify(next));
 }

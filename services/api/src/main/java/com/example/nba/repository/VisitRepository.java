@@ -11,4 +11,5 @@ public interface VisitRepository extends JpaRepository<Visit, UUID> {
   Page<Visit> findByDoctorIdOrderByVisitTimeDesc(UUID doctorId, Pageable pageable);
   Page<Visit> findByUserIdOrderByVisitTimeDesc(UUID userId, Pageable pageable);
   Optional<Visit> findByIdAndUserId(UUID id, UUID userId);
+  Optional<Visit> findByUserIdAndClientReferenceId(UUID userId, String clientReferenceId);
 }

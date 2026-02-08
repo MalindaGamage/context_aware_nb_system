@@ -69,8 +69,10 @@ export type Visit = {
   outcome: string;
   notes: string | null;
   followUpRequired: boolean;
+  clientReferenceId?: string | null;
   gpsCaptured: boolean;
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type CreateVisitRequest = {
@@ -79,6 +81,7 @@ export type CreateVisitRequest = {
   outcome: string;
   notes?: string;
   followUpRequired: boolean;
+  clientReferenceId?: string;
 };
 
 export type CaptureVisitGpsRequest = {
@@ -107,6 +110,77 @@ export type NbaRecommendation = {
 
 export type NbaNextResponse = {
   recommendations: NbaRecommendation[];
+};
+
+export type FeedbackStatus = "DONE" | "SKIPPED" | "RESCHEDULED";
+
+export type RecommendationFeedbackRequest = {
+  status: FeedbackStatus;
+  reason?: string;
+  overrideDoctorId?: string;
+  rescheduledTo?: string;
+  overrideNotes?: string;
+  clientReferenceId: string;
+};
+
+export type RecommendationFeedbackResponse = {
+  id: string;
+  recommendationId: string;
+  status: FeedbackStatus;
+  reason: string | null;
+  overrideDoctorId: string | null;
+  rescheduledTo: string | null;
+  overrideNotes: string | null;
+  clientReferenceId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SyncConflictStrategy = "SERVER_WINS" | "CLIENT_WINS";
+
+export type SyncVisitRequest = {
+  clientReferenceId: string;
+  doctorId: string;
+  visitTime: string;
+  outcome: string;
+  notes?: string;
+  followUpRequired: boolean;
+};
+
+export type SyncFeedbackRequest = {
+  clientReferenceId: string;
+  recommendationId: string;
+  status: FeedbackStatus;
+  reason?: string;
+  overrideDoctorId?: string;
+  rescheduledTo?: string;
+  overrideNotes?: string;
+};
+
+export type SyncBatchRequest = {
+  strategy: SyncConflictStrategy;
+  visits: SyncVisitRequest[];
+  feedback: SyncFeedbackRequest[];
+};
+
+export type SyncItemResult = {
+  clientReferenceId: string;
+  status: "APPLIED" | "CONFLICT";
+  serverId: string;
+  message: string;
+};
+
+export type SyncConflict = {
+  type: "visit" | "feedback";
+  clientReferenceId: string;
+  serverId: string;
+  reason: string;
+};
+
+export type SyncBatchResponse = {
+  visitResults: SyncItemResult[];
+  feedbackResults: SyncItemResult[];
+  conflicts: SyncConflict[];
 };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -379,4 +453,28 @@ export async function fetchNbaNext(token: string, limit = 5) {
   });
   if (!res.ok) throw new Error("Failed to load recommendations");
   return (await res.json()) as NbaNextResponse;
+}
+
+export async function submitRecommendationFeedback(
+  token: string,
+  recommendationId: string,
+  request: RecommendationFeedbackRequest
+) {
+  const res = await fetch(`${apiBase}/recommendations/${recommendationId}/feedback`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to submit feedback");
+  return (await res.json()) as RecommendationFeedbackResponse;
+}
+
+export async function syncBatch(token: string, request: SyncBatchRequest) {
+  const res = await fetch(`${apiBase}/sync/batch`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Sync failed");
+  return (await res.json()) as SyncBatchResponse;
 }

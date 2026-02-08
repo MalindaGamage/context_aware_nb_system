@@ -33,11 +33,17 @@ public class Visit {
   @Column(name = "follow_up_required", nullable = false)
   private boolean followUpRequired;
 
+  @Column(name = "client_reference_id")
+  private String clientReferenceId;
+
   @Column(columnDefinition = "geometry(POINT,4326)")
   private Point location;
 
   @Column(name = "created_at", nullable = false)
   private OffsetDateTime createdAt;
+
+  @Column(name = "updated_at", nullable = false)
+  private OffsetDateTime updatedAt;
 
   public UUID getId() { return id; }
   public void setId(UUID id) { this.id = id; }
@@ -60,9 +66,15 @@ public class Visit {
   public boolean isFollowUpRequired() { return followUpRequired; }
   public void setFollowUpRequired(boolean followUpRequired) { this.followUpRequired = followUpRequired; }
 
+  public String getClientReferenceId() { return clientReferenceId; }
+  public void setClientReferenceId(String clientReferenceId) { this.clientReferenceId = clientReferenceId; }
+
   public Point getLocation() { return location; }
   public void setLocation(Point location) { this.location = location; }
 
   public OffsetDateTime getCreatedAt() { return createdAt; }
   public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+
+  public OffsetDateTime getUpdatedAt() { return updatedAt; }
+  public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

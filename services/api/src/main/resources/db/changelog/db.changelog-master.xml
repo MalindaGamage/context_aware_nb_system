@@ -16,4 +16,8 @@
     <changeSet id="003-recommendation-factors" author="codex">
         <sqlFile path="db/changelog/003_recommendation_factors.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="004-feedback-sync" author="codex">
+        <sqlFile path="db/changelog/004_feedback_sync.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

@@ -5,11 +5,11 @@ import jakarta.validation.constraints.NotNull;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-public record CreateVisitRequest(
+public record SyncVisitRequest(
+    @NotBlank String clientReferenceId,
     @NotNull UUID doctorId,
     @NotNull OffsetDateTime visitTime,
     @NotBlank String outcome,
     String notes,
-    boolean followUpRequired,
-    String clientReferenceId
+    boolean followUpRequired
 ) {}

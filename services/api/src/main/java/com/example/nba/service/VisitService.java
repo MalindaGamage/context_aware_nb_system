@@ -38,7 +38,15 @@ public class VisitService {
   @Transactional
   public VisitResponse createVisit(CreateVisitRequest request, UUID actorUserId, boolean enforceMrScope) {
     doctorService.validateDoctorAccess(request.doctorId(), actorUserId, enforceMrScope);
+    String clientReferenceId = normalizeClientReference(request.clientReferenceId());
+    if (clientReferenceId != null) {
+      Visit existing = visitRepository.findByUserIdAndClientReferenceId(actorUserId, clientReferenceId).orElse(null);
+      if (existing != null) {
+        return toResponse(existing);
+      }
+    }
 
+    OffsetDateTime now = OffsetDateTime.now();
     Visit visit = new Visit();
     visit.setId(UUID.randomUUID());
     visit.setDoctorId(request.doctorId());
@@ -47,7 +55,9 @@ public class VisitService {
     visit.setOutcome(request.outcome().trim());
     visit.setNotes(normalizeNotes(request.notes()));
     visit.setFollowUpRequired(request.followUpRequired());
-    visit.setCreatedAt(OffsetDateTime.now());
+    visit.setClientReferenceId(clientReferenceId);
+    visit.setCreatedAt(now);
+    visit.setUpdatedAt(now);
     visitRepository.save(visit);
 
     auditLogService.log(actorUserId, "VISIT_CREATED", "VISIT", visit.getId(), Map.of(
@@ -84,6 +94,7 @@ public class VisitService {
     visit.setOutcome(request.outcome().trim());
     visit.setNotes(normalizeNotes(request.notes()));
     visit.setFollowUpRequired(request.followUpRequired());
+    visit.setUpdatedAt(OffsetDateTime.now());
     visitRepository.save(visit);
 
     auditLogService.log(actorUserId, "VISIT_UPDATED", "VISIT", visit.getId(), Map.of(
@@ -113,6 +124,7 @@ public class VisitService {
     Visit visit = resolveVisit(visitId, actorUserId, mrOnlyOwnVisits);
     Point point = GEOMETRY_FACTORY.createPoint(new org.locationtech.jts.geom.Coordinate(request.lon(), request.lat()));
     visit.setLocation(point);
+    visit.setUpdatedAt(OffsetDateTime.now());
     visitRepository.save(visit);
 
     auditLogService.log(actorUserId, "VISIT_GPS_CAPTURED", "VISIT", visit.getId(), Map.of(
@@ -139,6 +151,14 @@ public class VisitService {
     return trimmed.isEmpty() ? null : trimmed;
   }
 
+  private String normalizeClientReference(String clientReferenceId) {
+    if (clientReferenceId == null) {
+      return null;
+    }
+    String trimmed = clientReferenceId.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
   private VisitResponse toResponse(Visit visit) {
     return new VisitResponse(
         visit.getId(),
@@ -148,8 +168,10 @@ public class VisitService {
         visit.getOutcome(),
         visit.getNotes(),
         visit.isFollowUpRequired(),
+        visit.getClientReferenceId(),
         visit.getLocation() != null,
-        visit.getCreatedAt()
+        visit.getCreatedAt(),
+        visit.getUpdatedAt()
     );
   }
 }

@@ -11,6 +11,8 @@ public record VisitResponse(
     String outcome,
     String notes,
     boolean followUpRequired,
+    String clientReferenceId,
     boolean gpsCaptured,
-    OffsetDateTime createdAt
+    OffsetDateTime createdAt,
+    OffsetDateTime updatedAt
 ) {}

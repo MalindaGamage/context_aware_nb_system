@@ -79,8 +79,10 @@ CREATE TABLE visits (
   outcome VARCHAR(64) NOT NULL,
   notes TEXT,
   follow_up_required BOOLEAN NOT NULL DEFAULT FALSE,
+  client_reference_id VARCHAR(80),
   location GEOMETRY(POINT, 4326),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE recommendations (
@@ -105,9 +107,15 @@ CREATE TABLE recommendation_factors (
 CREATE TABLE recommendation_feedback (
   id UUID PRIMARY KEY,
   recommendation_id UUID NOT NULL REFERENCES recommendations(id) ON DELETE CASCADE,
+  created_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   status VARCHAR(32) NOT NULL,
   reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  override_doctor_id UUID REFERENCES doctors(id) ON DELETE SET NULL,
+  rescheduled_to TIMESTAMPTZ,
+  override_notes TEXT,
+  client_reference_id VARCHAR(80),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE audit_logs (
@@ -125,3 +133,10 @@ CREATE INDEX idx_territories_boundary ON territories USING GIST (boundary);
 CREATE INDEX idx_visits_doctor_time ON visits (doctor_id, visit_time DESC);
 CREATE INDEX idx_recommendations_user_time ON recommendations (user_id, created_at DESC);
 CREATE INDEX idx_recommendation_factors_recommendation_id ON recommendation_factors (recommendation_id);
+CREATE INDEX idx_feedback_recommendation ON recommendation_feedback (recommendation_id);
+CREATE UNIQUE INDEX uk_visits_user_client_reference
+  ON visits (user_id, client_reference_id)
+  WHERE client_reference_id IS NOT NULL;
+CREATE UNIQUE INDEX uk_feedback_user_client_reference
+  ON recommendation_feedback (created_by_user_id, client_reference_id)
+  WHERE client_reference_id IS NOT NULL;
