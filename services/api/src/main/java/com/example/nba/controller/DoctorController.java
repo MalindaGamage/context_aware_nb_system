@@ -1,9 +1,11 @@
 package com.example.nba.controller;
 
 import com.example.nba.dto.DoctorResponse;
+import com.example.nba.dto.AssignDoctorTerritoryRequest;
 import com.example.nba.dto.PageMeta;
 import com.example.nba.dto.PageResponse;
 import com.example.nba.service.DoctorService;
+import jakarta.validation.Valid;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -74,6 +78,14 @@ public class DoctorController {
         UUID.fromString(jwt.getSubject()),
         isMr(jwt)
     );
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @PutMapping("/api/v1/doctors/{id}/territory")
+  public DoctorResponse assignTerritory(@PathVariable UUID id,
+                                        @Valid @RequestBody AssignDoctorTerritoryRequest request,
+                                        @AuthenticationPrincipal Jwt jwt) {
+    return doctorService.assignTerritory(id, request.territoryId(), UUID.fromString(jwt.getSubject()));
   }
 
   @SuppressWarnings("unchecked")

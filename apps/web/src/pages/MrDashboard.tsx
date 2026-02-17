@@ -26,6 +26,7 @@ import {
   getConflicts,
   getQueuedFeedback,
   getQueuedVisits,
+  queueBreakdown,
   queueFeedback,
   queueSize,
   queueVisit,
@@ -34,8 +35,21 @@ import {
 } from "../offline/queue";
 import { Badge, Button, Card, Field, Pill, SectionTitle } from "../ui/components";
 
+const VISIT_DRAFT_PREFIX = "nba_visit_draft";
+
+function visitDraftKey(username: string, doctorId: string) {
+  return `${VISIT_DRAFT_PREFIX}:${username}:${doctorId}`;
+}
+
+type VisitDraft = {
+  visitTime: string;
+  outcome: string;
+  notes: string;
+  followUpRequired: boolean;
+};
+
 export default function MrDashboard() {
-  const { token, role } = useAuth();
+  const { token, role, username } = useAuth();
   const [myTerritories, setMyTerritories] = useState<Territory[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [visitHistory, setVisitHistory] = useState<Visit[]>([]);
@@ -49,11 +63,14 @@ export default function MrDashboard() {
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [gpsOptIn, setGpsOptIn] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [queuedVisitCount, setQueuedVisitCount] = useState(0);
+  const [queuedFeedbackCount, setQueuedFeedbackCount] = useState(0);
   const [nextActions, setNextActions] = useState<NbaRecommendation[]>([]);
   const [nbaLoading, setNbaLoading] = useState(false);
   const [syncStrategy, setSyncStrategy] = useState<SyncConflictStrategy>("SERVER_WINS");
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [status, setStatus] = useState("");
+  const [draftLoadedForDoctorId, setDraftLoadedForDoctorId] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -86,6 +103,52 @@ export default function MrDashboard() {
   }, [token, selectedDoctor]);
 
   useEffect(() => {
+    if (!selectedDoctor) {
+      setDraftLoadedForDoctorId("");
+      return;
+    }
+
+    const key = visitDraftKey(username, selectedDoctor.id);
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      setVisitTime(new Date().toISOString().slice(0, 16));
+      setOutcome("");
+      setNotes("");
+      setFollowUpRequired(false);
+      setDraftLoadedForDoctorId(selectedDoctor.id);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<VisitDraft>;
+      setVisitTime(typeof parsed.visitTime === "string" && parsed.visitTime ? parsed.visitTime : new Date().toISOString().slice(0, 16));
+      setOutcome(typeof parsed.outcome === "string" ? parsed.outcome : "");
+      setNotes(typeof parsed.notes === "string" ? parsed.notes : "");
+      setFollowUpRequired(Boolean(parsed.followUpRequired));
+    } catch {
+      setVisitTime(new Date().toISOString().slice(0, 16));
+      setOutcome("");
+      setNotes("");
+      setFollowUpRequired(false);
+    }
+    setDraftLoadedForDoctorId(selectedDoctor.id);
+  }, [selectedDoctor, username]);
+
+  useEffect(() => {
+    if (!selectedDoctor || draftLoadedForDoctorId !== selectedDoctor.id) {
+      return;
+    }
+    const key = visitDraftKey(username, selectedDoctor.id);
+    const draft: VisitDraft = {
+      visitTime,
+      outcome,
+      notes,
+      followUpRequired,
+    };
+    localStorage.setItem(key, JSON.stringify(draft));
+  }, [selectedDoctor, draftLoadedForDoctorId, username, visitTime, outcome, notes, followUpRequired]);
+
+  useEffect(() => {
     const onOnline = () => {
       if (!token) return;
       void syncQueued(token, syncStrategy);
@@ -111,9 +174,11 @@ export default function MrDashboard() {
   }, [token]);
 
   const refreshOfflineState = async () => {
-    const [size, pendingConflicts] = await Promise.all([queueSize(), getConflicts()]);
+    const [size, pendingConflicts, breakdown] = await Promise.all([queueSize(), getConflicts(), queueBreakdown()]);
     setPendingSyncCount(size);
     setConflicts(pendingConflicts);
+    setQueuedVisitCount(breakdown.visits);
+    setQueuedFeedbackCount(breakdown.feedback);
   };
 
   const refreshSelectedDoctorVisits = async () => {
@@ -141,21 +206,33 @@ export default function MrDashboard() {
 
     if (!navigator.onLine) {
       await queueVisit(payload);
+      localStorage.removeItem(visitDraftKey(username, selectedDoctor.id));
       await refreshOfflineState();
+      setOutcome("");
+      setNotes("");
+      setFollowUpRequired(false);
+      setVisitTime(new Date().toISOString().slice(0, 16));
       setStatus("Offline: visit queued for sync");
       return;
     }
 
     try {
       await createVisit(token, payload);
+      localStorage.removeItem(visitDraftKey(username, selectedDoctor.id));
       setOutcome("");
       setNotes("");
       setFollowUpRequired(false);
+      setVisitTime(new Date().toISOString().slice(0, 16));
       setStatus("Visit logged");
       await refreshSelectedDoctorVisits();
     } catch {
       await queueVisit(payload);
+      localStorage.removeItem(visitDraftKey(username, selectedDoctor.id));
       await refreshOfflineState();
+      setOutcome("");
+      setNotes("");
+      setFollowUpRequired(false);
+      setVisitTime(new Date().toISOString().slice(0, 16));
       setStatus("Network issue: visit queued for sync");
     }
   };
@@ -346,6 +423,11 @@ export default function MrDashboard() {
 
       <Card>
         <SectionTitle title="What next?" subtitle="Ranked recommendations with feedback actions." />
+        <div className="chips">
+          <Pill>Queued visits: {queuedVisitCount}</Pill>
+          <Pill>Queued feedback: {queuedFeedbackCount}</Pill>
+          <Pill>Conflicts: {conflicts.length}</Pill>
+        </div>
         <div className="filters">
           <Field label="Conflict Strategy">
             <select value={syncStrategy} onChange={(e) => setSyncStrategy(e.target.value as SyncConflictStrategy)}>

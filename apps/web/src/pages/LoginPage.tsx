@@ -40,7 +40,7 @@ export default function LoginPage() {
     try {
       const role = await login(username, password);
       setStatus("Signed in");
-      if (role === "ADMIN") navigate("/admin");
+      if (role === "ADMIN") navigate("/admin-settings");
       else if (role === "MANAGER") navigate("/manager");
       else navigate("/mr");
     } catch {

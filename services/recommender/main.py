@@ -23,6 +23,44 @@ class RecommendationItem(BaseModel):
     factors: list[RecommendationFactor]
 
 
+def load_scoring_config(cur: psycopg.Cursor[Any]) -> tuple[dict[str, float], dict[str, str], list[dict[str, Any]]]:
+    cur.execute(
+        """
+        SELECT weights, messages, segments
+        FROM scoring_config_versions
+        WHERE is_active = TRUE
+        ORDER BY version DESC
+        LIMIT 1
+        """
+    )
+    row = cur.fetchone()
+    if row is None:
+        return (
+            {
+                "tierA": 25.0,
+                "tierB": 15.0,
+                "tierC": 8.0,
+                "tierDefault": 4.0,
+                "priorityScale": 35.0,
+                "recencyScale": 15.0,
+                "followUpBonus": 20.0,
+                "recentVisitPenalty": -10.0,
+                "maxRecencyDays": 45.0,
+            },
+            {
+                "templateTopDrivers": "{driver1}, {driver2}, {driver3}",
+                "templateFallback": "Prioritized by active segment and recency",
+            },
+            [],
+        )
+
+    weights_raw, messages_raw, segments_raw = row
+    weights = dict(weights_raw or {})
+    messages = dict(messages_raw or {})
+    segments = list(segments_raw or [])
+    return weights, messages, segments
+
+
 def db_conn_string() -> str:
     host = os.getenv("DB_HOST", "localhost")
     port = os.getenv("DB_PORT", "5432")
@@ -45,6 +83,7 @@ def recommendations(
     now = datetime.now(timezone.utc)
     with psycopg.connect(db_conn_string()) as conn:
         with conn.cursor() as cur:
+            weights, messages, segments = load_scoring_config(cur)
             cur.execute(
                 """
                 SELECT d.id::text,
@@ -85,15 +124,38 @@ def recommendations(
             days_since = max(0, int((now - last_visit_time).total_seconds() // 86400))
             days_value = str(days_since)
 
-        tier_points_map = {"A": 25.0, "B": 15.0, "C": 8.0}
-        tier_points = tier_points_map.get(tier_norm, 4.0)
-        priority_points = round((priority / 100.0) * 35.0, 2)
-        recency_points = round(min(days_since, 45) / 45.0 * 15.0, 2)
-        follow_up_points = 20.0 if bool(follow_up_required) else 0.0
-        saturation_penalty = -10.0 if days_since <= 7 else 0.0
+        max_recency_days = float(weights.get("maxRecencyDays", 45.0))
+        tier_points_map = {
+            "A": float(weights.get("tierA", 25.0)),
+            "B": float(weights.get("tierB", 15.0)),
+            "C": float(weights.get("tierC", 8.0)),
+        }
+        tier_points = tier_points_map.get(tier_norm, float(weights.get("tierDefault", 4.0)))
+        priority_points = round((priority / 100.0) * float(weights.get("priorityScale", 35.0)), 2)
+        recency_points = round(min(days_since, max_recency_days) / max_recency_days * float(weights.get("recencyScale", 15.0)), 2)
+        follow_up_points = float(weights.get("followUpBonus", 20.0)) if bool(follow_up_required) else 0.0
+        recent_visit_days = int(weights.get("recentVisitDays", 7))
+        saturation_penalty = float(weights.get("recentVisitPenalty", -10.0)) if days_since <= recent_visit_days else 0.0
+
+        segment_bonus_total = 0.0
+        segment_tags: list[str] = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            seg_tier = str(segment.get("tier", "")).upper().strip()
+            seg_priority_min = float(segment.get("priorityMin", 0))
+            seg_follow_up = segment.get("followUpRequired", None)
+            matches_tier = seg_tier == "" or seg_tier == tier_norm
+            matches_priority = priority >= seg_priority_min
+            matches_follow_up = seg_follow_up is None or bool(seg_follow_up) == bool(follow_up_required)
+            if matches_tier and matches_priority and matches_follow_up:
+                segment_bonus = float(segment.get("scoreBonus", 0.0))
+                segment_bonus_total += segment_bonus
+                segment_name = str(segment.get("name", "Segment"))
+                segment_tags.append(segment_name)
 
         total_score = round(
-            tier_points + priority_points + recency_points + follow_up_points + saturation_penalty,
+            tier_points + priority_points + recency_points + follow_up_points + saturation_penalty + segment_bonus_total,
             2,
         )
 
@@ -113,9 +175,24 @@ def recommendations(
                     key="recent_visit_penalty", value=f"{days_since} days", contribution=saturation_penalty
                 )
             )
+        if segment_bonus_total != 0:
+            factors.append(
+                RecommendationFactor(
+                    key="segment_bonus",
+                    value=", ".join(segment_tags) if segment_tags else "matched",
+                    contribution=segment_bonus_total,
+                )
+            )
 
         top = sorted(factors, key=lambda item: abs(item.contribution), reverse=True)[:3]
-        explanation = ", ".join(f"{item.key}={item.value}" for item in top)
+        template = str(messages.get("templateTopDrivers", "{driver1}, {driver2}, {driver3}"))
+        explanation = template
+        for idx in range(3):
+            token = f"{{driver{idx + 1}}}"
+            value = f"{top[idx].key}={top[idx].value}" if idx < len(top) else "-"
+            explanation = explanation.replace(token, value)
+        if not explanation.strip():
+            explanation = str(messages.get("templateFallback", "Prioritized by active segment and recency"))
         scored.append(
             {
                 "doctor_id": doctor_id,

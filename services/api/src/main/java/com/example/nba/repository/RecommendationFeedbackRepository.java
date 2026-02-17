@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface RecommendationFeedbackRepository extends JpaRepository<RecommendationFeedback, UUID> {
   Optional<RecommendationFeedback> findByCreatedByUserIdAndClientReferenceId(UUID userId, String clientReferenceId);
+  Optional<RecommendationFeedback> findTopByRecommendationIdOrderByCreatedAtDesc(UUID recommendationId);
 }

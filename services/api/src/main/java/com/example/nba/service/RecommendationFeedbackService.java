@@ -19,6 +19,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class RecommendationFeedbackService {
+  private static final int MAX_REASON_LENGTH = 500;
+  private static final int MAX_OVERRIDE_NOTES_LENGTH = 1000;
+
   private final RecommendationRepository recommendationRepository;
   private final RecommendationFeedbackRepository feedbackRepository;
   private final DoctorService doctorService;
@@ -87,6 +90,10 @@ public class RecommendationFeedbackService {
         return toSyncOutcome(existing, false, "Already recorded");
       }
 
+      String previousStatus = existing.getStatus();
+      UUID previousOverrideDoctorId = existing.getOverrideDoctorId();
+      String previousReason = existing.getReason();
+
       existing.setRecommendationId(recommendation.getId());
       existing.setStatus(request.status().name());
       existing.setReason(normalizeNullable(request.reason()));
@@ -95,6 +102,17 @@ public class RecommendationFeedbackService {
       existing.setOverrideNotes(normalizeNullable(request.overrideNotes()));
       existing.setUpdatedAt(OffsetDateTime.now());
       feedbackRepository.save(existing);
+
+      auditLogService.log(userId, "RECOMMENDATION_FEEDBACK_UPDATED", "RECOMMENDATION_FEEDBACK", existing.getId(), Map.of(
+          "recommendationId", recommendation.getId().toString(),
+          "previousStatus", previousStatus,
+          "newStatus", existing.getStatus(),
+          "previousOverrideDoctorId", previousOverrideDoctorId == null ? "" : previousOverrideDoctorId.toString(),
+          "newOverrideDoctorId", existing.getOverrideDoctorId() == null ? "" : existing.getOverrideDoctorId().toString(),
+          "previousReason", previousReason == null ? "" : previousReason,
+          "newReason", existing.getReason() == null ? "" : existing.getReason()
+      ));
+
       return toSyncOutcome(existing, false, "Updated");
     }
 
@@ -126,6 +144,20 @@ public class RecommendationFeedbackService {
     if (request.status() == FeedbackStatus.RESCHEDULED && request.rescheduledTo() == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rescheduledTo is required for RESCHEDULED status");
     }
+
+    String reason = normalizeNullable(request.reason());
+    if ((request.status() == FeedbackStatus.SKIPPED || request.status() == FeedbackStatus.RESCHEDULED) && reason == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reason is required for SKIPPED/RESCHEDULED status");
+    }
+    if (reason != null && reason.length() > MAX_REASON_LENGTH) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reason length must be <= " + MAX_REASON_LENGTH);
+    }
+
+    String overrideNotes = normalizeNullable(request.overrideNotes());
+    if (overrideNotes != null && overrideNotes.length() > MAX_OVERRIDE_NOTES_LENGTH) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "overrideNotes length must be <= " + MAX_OVERRIDE_NOTES_LENGTH);
+    }
+
     if (request.overrideDoctorId() != null) {
       doctorService.validateDoctorAccess(request.overrideDoctorId(), userId, enforceMrScope);
     }

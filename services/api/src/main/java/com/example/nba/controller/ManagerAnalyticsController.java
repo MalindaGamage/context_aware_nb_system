@@ -1,8 +1,10 @@
 package com.example.nba.controller;
 
 import com.example.nba.dto.ManagerAnalyticsResponse;
+import com.example.nba.dto.TerritoryOverviewResponse;
 import com.example.nba.service.ManagerAnalyticsService;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,5 +29,14 @@ public class ManagerAnalyticsController {
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
   ) {
     return managerAnalyticsService.getDashboard(mrId, territoryId, from, to);
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @GetMapping("/api/v1/analytics/territories")
+  public List<TerritoryOverviewResponse> territoryOverview(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+  ) {
+    return managerAnalyticsService.territoryOverview(from, to);
   }
 }

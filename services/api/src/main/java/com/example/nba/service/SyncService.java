@@ -8,14 +8,16 @@ import com.example.nba.dto.SyncConflictStrategy;
 import com.example.nba.dto.SyncFeedbackRequest;
 import com.example.nba.dto.SyncItemResult;
 import com.example.nba.dto.SyncVisitRequest;
+import com.example.nba.dto.UpdateVisitRequest;
 import com.example.nba.entity.Visit;
 import com.example.nba.repository.VisitRepository;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 @Service
 public class SyncService {
@@ -81,7 +83,10 @@ public class SyncService {
                                    SyncVisitRequest request,
                                    SyncConflictStrategy strategy,
                                    List<SyncConflict> conflicts) {
-    String clientRef = request.clientReferenceId().trim();
+    String clientRef = request.clientReferenceId() == null ? "" : request.clientReferenceId().trim();
+    if (clientRef.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "clientReferenceId is required");
+    }
     doctorService.validateDoctorAccess(request.doctorId(), userId, enforceMrScope);
 
     Visit existing = visitRepository.findByUserIdAndClientReferenceId(userId, clientRef).orElse(null);
@@ -96,18 +101,30 @@ public class SyncService {
       return new SyncItemResult(clientRef, "APPLIED", created.id().toString(), "Created");
     }
 
+    if (!existing.getDoctorId().equals(request.doctorId())) {
+      conflicts.add(new SyncConflict("visit", clientRef, existing.getId().toString(), "Doctor cannot change for existing visit"));
+      return new SyncItemResult(clientRef, "CONFLICT", existing.getId().toString(), "Doctor cannot change for existing visit");
+    }
+
+    if (sameVisit(existing, request)) {
+      return new SyncItemResult(clientRef, "APPLIED", existing.getId().toString(), "No changes");
+    }
+
     if (strategy == SyncConflictStrategy.SERVER_WINS && !sameVisit(existing, request)) {
       conflicts.add(new SyncConflict("visit", clientRef, existing.getId().toString(), "Existing visit differs on server"));
       return new SyncItemResult(clientRef, "CONFLICT", existing.getId().toString(), "Existing visit differs on server");
     }
 
-    existing.setDoctorId(request.doctorId());
-    existing.setVisitTime(request.visitTime());
-    existing.setOutcome(request.outcome().trim());
-    existing.setNotes(normalizeNullable(request.notes()));
-    existing.setFollowUpRequired(request.followUpRequired());
-    existing.setUpdatedAt(OffsetDateTime.now());
-    visitRepository.save(existing);
+    visitService.updateVisit(
+        existing.getId(),
+        new UpdateVisitRequest(
+            request.visitTime(),
+            request.outcome(),
+            request.notes(),
+            request.followUpRequired()),
+        userId,
+        enforceMrScope);
+
     return new SyncItemResult(clientRef, "APPLIED", existing.getId().toString(), "Updated");
   }
 

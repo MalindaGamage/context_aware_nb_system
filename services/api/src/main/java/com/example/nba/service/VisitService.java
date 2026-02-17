@@ -22,6 +22,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class VisitService {
   private static final GeometryFactory GEOMETRY_FACTORY = new GeometryFactory(new PrecisionModel(), 4326);
+  private static final int MAX_OUTCOME_LENGTH = 120;
+  private static final int MAX_NOTES_LENGTH = 2000;
 
   private final VisitRepository visitRepository;
   private final DoctorService doctorService;
@@ -51,8 +53,8 @@ public class VisitService {
     visit.setId(UUID.randomUUID());
     visit.setDoctorId(request.doctorId());
     visit.setUserId(actorUserId);
-    visit.setVisitTime(request.visitTime());
-    visit.setOutcome(request.outcome().trim());
+    visit.setVisitTime(validateVisitTime(request.visitTime()));
+    visit.setOutcome(normalizeOutcome(request.outcome()));
     visit.setNotes(normalizeNotes(request.notes()));
     visit.setFollowUpRequired(request.followUpRequired());
     visit.setClientReferenceId(clientReferenceId);
@@ -90,8 +92,8 @@ public class VisitService {
     boolean oldFollowUp = visit.isFollowUpRequired();
     String oldNotes = visit.getNotes();
 
-    visit.setVisitTime(request.visitTime());
-    visit.setOutcome(request.outcome().trim());
+    visit.setVisitTime(validateVisitTime(request.visitTime()));
+    visit.setOutcome(normalizeOutcome(request.outcome()));
     visit.setNotes(normalizeNotes(request.notes()));
     visit.setFollowUpRequired(request.followUpRequired());
     visit.setUpdatedAt(OffsetDateTime.now());
@@ -128,8 +130,8 @@ public class VisitService {
     visitRepository.save(visit);
 
     auditLogService.log(actorUserId, "VISIT_GPS_CAPTURED", "VISIT", visit.getId(), Map.of(
-        "lat", request.lat(),
-        "lon", request.lon()
+        "gpsCaptured", true,
+        "optIn", true
     ));
     return toResponse(visit);
   }
@@ -148,7 +150,32 @@ public class VisitService {
       return null;
     }
     String trimmed = notes.trim();
+    if (trimmed.length() > MAX_NOTES_LENGTH) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Notes length must be <= " + MAX_NOTES_LENGTH);
+    }
     return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private String normalizeOutcome(String outcome) {
+    String trimmed = outcome.trim();
+    if (trimmed.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Outcome is required");
+    }
+    if (trimmed.length() > MAX_OUTCOME_LENGTH) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Outcome length must be <= " + MAX_OUTCOME_LENGTH);
+    }
+    return trimmed;
+  }
+
+  private OffsetDateTime validateVisitTime(OffsetDateTime visitTime) {
+    OffsetDateTime now = OffsetDateTime.now();
+    if (visitTime.isAfter(now.plusMinutes(5))) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Visit time cannot be in the future");
+    }
+    if (visitTime.isBefore(now.minusYears(2))) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Visit time is too old");
+    }
+    return visitTime;
   }
 
   private String normalizeClientReference(String clientReferenceId) {

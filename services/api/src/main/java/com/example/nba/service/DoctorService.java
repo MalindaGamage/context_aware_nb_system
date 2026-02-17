@@ -4,8 +4,10 @@ import com.example.nba.dto.DoctorResponse;
 import com.example.nba.entity.Doctor;
 import com.example.nba.repository.DoctorRepository;
 import com.example.nba.repository.TerritoryAssignmentRepository;
+import com.example.nba.repository.TerritoryRepository;
 import com.example.nba.spec.DoctorSpecifications;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
@@ -19,11 +21,17 @@ import org.springframework.web.server.ResponseStatusException;
 public class DoctorService {
   private final DoctorRepository doctorRepository;
   private final TerritoryAssignmentRepository territoryAssignmentRepository;
+  private final TerritoryRepository territoryRepository;
+  private final AuditLogService auditLogService;
 
   public DoctorService(DoctorRepository doctorRepository,
-                       TerritoryAssignmentRepository territoryAssignmentRepository) {
+                       TerritoryAssignmentRepository territoryAssignmentRepository,
+                       TerritoryRepository territoryRepository,
+                       AuditLogService auditLogService) {
     this.doctorRepository = doctorRepository;
     this.territoryAssignmentRepository = territoryAssignmentRepository;
+    this.territoryRepository = territoryRepository;
+    this.auditLogService = auditLogService;
   }
 
   public Page<DoctorResponse> listDoctors(
@@ -100,6 +108,26 @@ public class DoctorService {
 
   public void validateDoctorAccess(UUID doctorId, UUID userId, boolean enforceAssignedTerritories) {
     getDoctor(doctorId, userId, enforceAssignedTerritories);
+  }
+
+  public DoctorResponse assignTerritory(UUID doctorId, UUID territoryId, UUID actorUserId) {
+    Doctor doctor = doctorRepository.findById(doctorId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Doctor not found"));
+
+    UUID previousTerritoryId = doctor.getTerritoryId();
+    if (territoryId != null && !territoryRepository.existsById(territoryId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Territory not found");
+    }
+
+    doctor.setTerritoryId(territoryId);
+    doctorRepository.save(doctor);
+
+    auditLogService.log(actorUserId, "DOCTOR_TERRITORY_ASSIGNED", "DOCTOR", doctor.getId(), Map.of(
+        "previousTerritoryId", previousTerritoryId == null ? "" : previousTerritoryId.toString(),
+        "newTerritoryId", territoryId == null ? "" : territoryId.toString()
+    ));
+
+    return toResponse(doctor);
   }
 
   private List<UUID> resolveAllowedTerritories(UUID userId, boolean enforceAssignedTerritories) {

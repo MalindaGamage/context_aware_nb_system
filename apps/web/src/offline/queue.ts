@@ -105,6 +105,16 @@ export async function queueSize(): Promise<number> {
   return visitCount + feedbackCount;
 }
 
+export async function queueBreakdown(): Promise<{ visits: number; feedback: number; total: number }> {
+  const db = await openDb();
+  const tx = db.transaction([VISITS_STORE, FEEDBACK_STORE], "readonly");
+  const visits = await requestResult(tx.objectStore(VISITS_STORE).count());
+  const feedback = await requestResult(tx.objectStore(FEEDBACK_STORE).count());
+  await txComplete(tx);
+  db.close();
+  return { visits, feedback, total: visits + feedback };
+}
+
 export async function cacheNbaSnapshot(recommendations: NbaRecommendation[]): Promise<void> {
   const db = await openDb();
   const tx = db.transaction(SNAPSHOT_STORE, "readwrite");

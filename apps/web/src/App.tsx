@@ -3,9 +3,12 @@ import { AuthProvider } from "./auth/AuthContext";
 import RequireAuth from "./auth/RequireAuth";
 import AppShell from "./layout/AppShell";
 import LoginPage from "./pages/LoginPage";
-import MrDashboard from "./pages/MrDashboard";
+import NbaDashboardPage from "./pages/NbaDashboardPage";
+import DoctorDirectoryPage from "./pages/DoctorDirectoryPage";
+import VisitLogPage from "./pages/VisitLogPage";
 import ManagerDashboard from "./pages/ManagerDashboard";
-import AdminDashboard from "./pages/AdminDashboard";
+import TerritoriesPage from "./pages/TerritoriesPage";
+import AdminSettingsPage from "./pages/AdminSettingsPage";
 
 export default function App() {
   return (
@@ -19,7 +22,27 @@ export default function App() {
             element={
               <RequireAuth roles={["MR", "MANAGER", "ADMIN"]}>
                 <AppShell>
-                  <MrDashboard />
+                  <NbaDashboardPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/doctors"
+            element={
+              <RequireAuth roles={["MR", "MANAGER", "ADMIN"]}>
+                <AppShell>
+                  <DoctorDirectoryPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/visits"
+            element={
+              <RequireAuth roles={["MR", "MANAGER", "ADMIN"]}>
+                <AppShell>
+                  <VisitLogPage />
                 </AppShell>
               </RequireAuth>
             }
@@ -35,15 +58,27 @@ export default function App() {
             }
           />
           <Route
-            path="/admin"
+            path="/territories"
             element={
-              <RequireAuth roles={["ADMIN"]}>
+              <RequireAuth roles={["MANAGER", "ADMIN"]}>
                 <AppShell>
-                  <AdminDashboard />
+                  <TerritoriesPage />
                 </AppShell>
               </RequireAuth>
             }
           />
+          <Route
+            path="/admin-settings"
+            element={
+              <RequireAuth roles={["ADMIN"]}>
+                <AppShell>
+                  <AdminSettingsPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route path="/manager/territories" element={<Navigate to="/territories" replace />} />
+          <Route path="/admin" element={<Navigate to="/admin-settings" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </AuthProvider>

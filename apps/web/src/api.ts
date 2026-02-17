@@ -75,6 +75,16 @@ export type ManagerAnalyticsResponse = {
   complianceByMr: MrComplianceRow[];
 };
 
+export type TerritoryOverview = {
+  territoryId: string;
+  territoryName: string;
+  territoryCode: string;
+  assignedMrCount: number;
+  doctorCount: number;
+  visitCount: number;
+  lastVisitTime: string | null;
+};
+
 export type UserProfile = {
   id: string;
   fullName: string;
@@ -103,6 +113,62 @@ export type CreateTerritoryRequest = {
 export type AssignTerritoryRequest = {
   territoryId: string;
   startsOn?: string;
+};
+
+export type AssignDoctorTerritoryRequest = {
+  territoryId: string | null;
+};
+
+export type ScoringConfig = {
+  id: string;
+  version: number;
+  name: string;
+  weights: Record<string, number>;
+  messages: Record<string, string>;
+  segments: Array<Record<string, unknown>>;
+  active: boolean;
+  createdByUserId: string | null;
+  createdAt: string;
+};
+
+export type ProductSummary = {
+  id: string;
+  name: string;
+  category: string;
+  active: boolean;
+  assignedDoctors: number;
+};
+
+export type CreateScoringConfigRequest = {
+  name: string;
+  weights: Record<string, number>;
+  messages: Record<string, string>;
+  segments: Array<Record<string, unknown>>;
+  activate: boolean;
+};
+
+export type AuditLog = {
+  id: string;
+  actorUserId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type RecommendationLog = {
+  recommendationId: string;
+  userId: string;
+  doctorId: string;
+  doctorName: string;
+  score: number;
+  explanation: string;
+  createdAt: string;
+  drivers: RecommendationDriver[];
+  latestFeedbackStatus: string | null;
+  latestFeedbackReason: string | null;
+  latestOverrideDoctorId: string | null;
 };
 
 export type Visit = {
@@ -274,11 +340,16 @@ export async function login(username: string, password: string) {
   return { ...data, realm_role: decodePrimaryRole(data.access_token) };
 }
 
-export async function fetchDoctors(token: string, params: { tier?: string; specialty?: string; territoryId?: string }) {
+export async function fetchDoctors(
+  token: string,
+  params: { tier?: string; specialty?: string; territoryId?: string; page?: number; size?: number }
+) {
   const search = new URLSearchParams();
   if (params.tier) search.set("tier", params.tier);
   if (params.specialty) search.set("specialty", params.specialty);
   if (params.territoryId) search.set("territoryId", params.territoryId);
+  search.set("page", String(params.page ?? 0));
+  search.set("size", String(params.size ?? 100));
   const res = await fetch(`${apiBase}/doctors?${search.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -437,6 +508,16 @@ export async function unassignTerritoryFromMr(token: string, userId: string, ter
   return (await res.json()) as Territory[];
 }
 
+export async function assignDoctorTerritory(token: string, doctorId: string, request: AssignDoctorTerritoryRequest) {
+  const res = await fetch(`${apiBase}/doctors/${doctorId}/territory`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to assign doctor territory");
+  return (await res.json()) as Doctor;
+}
+
 export async function fetchSecurePing(token: string) {
   const res = await fetch(`${apiBase}/secure/ping`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -515,6 +596,17 @@ export async function fetchManagerAnalytics(
   return (await res.json()) as ManagerAnalyticsResponse;
 }
 
+export async function fetchTerritoryOverview(token: string, params: { from?: string; to?: string }) {
+  const search = new URLSearchParams();
+  if (params.from) search.set("from", params.from);
+  if (params.to) search.set("to", params.to);
+  const res = await fetch(`${apiBase}/analytics/territories?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load territory overview");
+  return (await res.json()) as TerritoryOverview[];
+}
+
 export async function submitRecommendationFeedback(
   token: string,
   recommendationId: string,
@@ -537,4 +629,82 @@ export async function syncBatch(token: string, request: SyncBatchRequest) {
   });
   if (!res.ok) throw new Error("Sync failed");
   return (await res.json()) as SyncBatchResponse;
+}
+
+export async function fetchScoringConfigs(token: string) {
+  const res = await fetch(`${apiBase}/admin/scoring-configs`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load scoring configs");
+  return (await res.json()) as ScoringConfig[];
+}
+
+export async function fetchActiveScoringConfig(token: string) {
+  const res = await fetch(`${apiBase}/admin/scoring-configs/active`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load active scoring config");
+  return (await res.json()) as ScoringConfig;
+}
+
+export async function createScoringConfig(token: string, request: CreateScoringConfigRequest) {
+  const res = await fetch(`${apiBase}/admin/scoring-configs`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create scoring config");
+  return (await res.json()) as ScoringConfig;
+}
+
+export async function activateScoringConfig(token: string, configId: string) {
+  const res = await fetch(`${apiBase}/admin/scoring-configs/${configId}/activate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to activate scoring config");
+  return (await res.json()) as ScoringConfig;
+}
+
+export async function fetchAuditLogs(
+  token: string,
+  params: { actorUserId?: string; action?: string; entityType?: string; from?: string; to?: string; page?: number; size?: number }
+) {
+  const search = new URLSearchParams();
+  if (params.actorUserId) search.set("actorUserId", params.actorUserId);
+  if (params.action) search.set("action", params.action);
+  if (params.entityType) search.set("entityType", params.entityType);
+  if (params.from) search.set("from", params.from);
+  if (params.to) search.set("to", params.to);
+  search.set("page", String(params.page ?? 0));
+  search.set("size", String(params.size ?? 20));
+  const res = await fetch(`${apiBase}/admin/audit-logs?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load audit logs");
+  return (await res.json()) as PageResponse<AuditLog>;
+}
+
+export async function fetchRecommendationLogs(
+  token: string,
+  params: { userId?: string; doctorId?: string; page?: number; size?: number }
+) {
+  const search = new URLSearchParams();
+  if (params.userId) search.set("userId", params.userId);
+  if (params.doctorId) search.set("doctorId", params.doctorId);
+  search.set("page", String(params.page ?? 0));
+  search.set("size", String(params.size ?? 20));
+  const res = await fetch(`${apiBase}/admin/recommendation-logs?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load recommendation logs");
+  return (await res.json()) as PageResponse<RecommendationLog>;
+}
+
+export async function fetchAdminProducts(token: string) {
+  const res = await fetch(`${apiBase}/admin/products`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load products");
+  return (await res.json()) as ProductSummary[];
 }
