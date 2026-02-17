@@ -60,9 +60,13 @@ public class SecurityConfig {
   @Bean
   public NimbusJwtDecoder jwtDecoder(
       @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
+      @Value("${security.jwt.jwk-set-uri:}") String jwkSetUri,
       @Value("${security.jwt.additional-issuers:http://host.docker.internal:8081/realms/nba,http://localhost:8081/realms/nba}")
       String additionalIssuers) {
-    NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(issuerUri + "/protocol/openid-connect/certs").build();
+    String effectiveJwkSetUri = jwkSetUri == null || jwkSetUri.isBlank()
+        ? issuerUri + "/protocol/openid-connect/certs"
+        : jwkSetUri.trim();
+    NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(effectiveJwkSetUri).build();
 
     Set<String> trustedIssuers = new LinkedHashSet<>();
     trustedIssuers.add(issuerUri);

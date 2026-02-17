@@ -33,7 +33,6 @@ import {
   saveConflicts,
 } from "../offline/queue";
 import { Badge, Button, Card, Field, Pill, SectionTitle } from "../ui/components";
-import OfflineBanner from "../ui/OfflineBanner";
 
 export default function MrDashboard() {
   const { token, role } = useAuth();
@@ -328,7 +327,6 @@ export default function MrDashboard() {
 
   return (
     <div className="page">
-      <OfflineBanner />
       <div className="page-header">
         <div>
           <h1>MR Workspace</h1>

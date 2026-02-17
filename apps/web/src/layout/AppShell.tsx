@@ -1,10 +1,16 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import OfflineBanner from "../ui/OfflineBanner";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { role, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <div className="shell">
@@ -28,7 +34,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           )}
         </nav>
-        <button className="ghost" onClick={logout}>
+        <button className="ghost" onClick={handleLogout}>
           Log out
         </button>
       </aside>

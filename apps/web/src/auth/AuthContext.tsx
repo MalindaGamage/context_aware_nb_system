@@ -8,7 +8,7 @@ type AuthState = {
 };
 
 type AuthContextValue = AuthState & {
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<string | null>;
   logout: () => void;
   setRole: (role: string | null) => void;
 };
@@ -40,14 +40,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (user: string, password: string) => {
     const response = await loginRequest(user, password);
+    const resolvedRole = response.realm_role || null;
     setToken(response.access_token);
-    setRole(response.realm_role || null);
+    setRole(resolvedRole);
     setUsername(user);
+    return resolvedRole;
   };
 
   const logout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ROLE_KEY);
+    localStorage.removeItem(USER_KEY);
     setToken(null);
     setRole(null);
+    setUsername("mr1");
   };
 
   const value = useMemo(

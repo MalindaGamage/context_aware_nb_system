@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: NBA API
-  version: 1.0.0
-  description: Context-Aware Next Best Action API
+  version: 1.1.0
+  description: Context-Aware Next Best Action API (Sprint 0/1 baseline)
 servers:
   - url: /api/v1
 security:
@@ -10,7 +10,8 @@ security:
 paths:
   /auth/login:
     post:
-      summary: Login (placeholder - OAuth2 provider recommended)
+      summary: Login via OAuth2 password grant (proxied to Keycloak in web app)
+      security: []
       requestBody:
         required: true
         content:
@@ -19,67 +20,109 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Token response
+          description: Access token payload
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /secure/ping:
+    get:
+      summary: Dummy protected API for end-to-end auth validation
+      responses:
+        '200':
+          description: Pong response
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Missing/invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /doctors:
     get:
-      summary: List doctors
+      summary: Doctor directory with filtering + pagination
       parameters:
         - in: query
           name: tier
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: specialty
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: territoryId
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
         - in: query
           name: page
-          schema: { type: integer, default: 0 }
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
         - in: query
           name: size
-          schema: { type: integer, default: 20 }
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
       responses:
         '200':
-          description: OK
+          description: Paged doctor result
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PageDoctor'
         '400':
-          description: Bad request
+          description: Invalid query parameters
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-    post:
-      summary: Create doctor
-      responses:
-        '201':
-          description: Created
+        '401':
+          description: Missing/invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /doctors/{id}:
     get:
-      summary: Get doctor
+      summary: Doctor detail
       parameters:
         - in: path
           name: id
           required: true
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: OK
+          description: Doctor found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Doctor'
         '404':
-          description: Not found
+          description: Doctor not found (or out of MR territory scope)
           content:
             application/json:
               schema:
@@ -87,25 +130,34 @@ paths:
 
   /doctors/nearby:
     get:
-      summary: Find nearby doctors
+      summary: Nearby doctors from GPS coordinates
       parameters:
         - in: query
           name: lat
           required: true
-          schema: { type: number }
+          schema:
+            type: number
+            format: double
         - in: query
           name: lon
           required: true
-          schema: { type: number }
+          schema:
+            type: number
+            format: double
         - in: query
           name: radiusKm
-          schema: { type: number, default: 5 }
+          schema:
+            type: number
+            format: double
+            default: 5
         - in: query
           name: limit
-          schema: { type: integer, default: 20 }
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: OK
+          description: Nearby doctors
           content:
             application/json:
               schema:
@@ -113,36 +165,18 @@ paths:
                 items:
                   $ref: '#/components/schemas/Doctor'
         '400':
-          description: Bad request
+          description: Invalid coordinates
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /visits:
-    get:
-      summary: List visits
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Visit'
-    post:
-      summary: Log visit
-      responses:
-        '201':
-          description: Created
-
   /territories:
     get:
-      summary: List territories
+      summary: Territory directory
       responses:
         '200':
-          description: OK
+          description: Territory list
           content:
             application/json:
               schema:
@@ -152,10 +186,10 @@ paths:
 
   /users/mrs:
     get:
-      summary: List MRs with territory summary
+      summary: MR list with assigned territories summary
       responses:
         '200':
-          description: OK
+          description: MR list
           content:
             application/json:
               schema:
@@ -165,92 +199,16 @@ paths:
 
   /users/me/territories:
     get:
-      summary: List territories for current user
+      summary: Territories for current user
       responses:
         '200':
-          description: OK
+          description: Current user territory list
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Territory'
-
-  /secure/ping:
-    get:
-      summary: Protected ping
-      responses:
-        '200':
-          description: OK
-          content:
-            text/plain:
-              schema:
-                type: string
-
-  /products:
-    get:
-      summary: List products
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Product'
-
-  /messages:
-    get:
-      summary: List messages
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Message'
-
-  /recommendations:
-    get:
-      summary: Get recommendations
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Recommendation'
-
-  /feedback:
-    post:
-      summary: Submit recommendation feedback
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RecommendationFeedback'
-      responses:
-        '201':
-          description: Created
-
-  /audit-logs:
-    get:
-      summary: List audit logs (Admin)
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AuditLog'
 
 components:
   securitySchemes:
@@ -261,35 +219,67 @@ components:
   schemas:
     ErrorResponse:
       type: object
+      required: [code, message, path, timestamp]
       properties:
-        code: { type: string }
-        message: { type: string }
-        path: { type: string }
-        timestamp: { type: string, format: date-time }
+        code:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
     LoginRequest:
       type: object
+      required: [username, password]
       properties:
-        email: { type: string }
-        password: { type: string }
-      required: [email, password]
+        username:
+          type: string
+        password:
+          type: string
+
     TokenResponse:
       type: object
+      required: [access_token, token_type]
       properties:
-        access_token: { type: string }
-        token_type: { type: string }
-        expires_in: { type: integer }
+        access_token:
+          type: string
+        token_type:
+          type: string
+        expires_in:
+          type: integer
+        refresh_token:
+          type: string
+
     Doctor:
       type: object
+      required: [id, fullName, tier, priorityScore]
       properties:
-        id: { type: string, format: uuid }
-        fullName: { type: string }
-        specialty: { type: string }
-        tier: { type: string }
-        priorityScore: { type: integer }
-        territoryId: { type: string, format: uuid }
-        notes: { type: string }
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        specialty:
+          type: string
+          nullable: true
+        tier:
+          type: string
+        priorityScore:
+          type: integer
+        territoryId:
+          type: string
+          format: uuid
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
     PageDoctor:
       type: object
+      required: [content, meta]
       properties:
         content:
           type: array
@@ -297,75 +287,45 @@ components:
             $ref: '#/components/schemas/Doctor'
         meta:
           $ref: '#/components/schemas/PageMeta'
+
     PageMeta:
       type: object
+      required: [page, size, totalElements, totalPages]
       properties:
-        page: { type: integer }
-        size: { type: integer }
-        totalElements: { type: integer }
-        totalPages: { type: integer }
-    Visit:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        doctor_id: { type: string, format: uuid }
-        user_id: { type: string, format: uuid }
-        visit_time: { type: string, format: date-time }
-        outcome: { type: string }
-        notes: { type: string }
-        follow_up_required: { type: boolean }
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+
     Territory:
       type: object
+      required: [id, name, code]
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        code: { type: string }
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        code:
+          type: string
+
     UserSummary:
       type: object
+      required: [id, fullName, email, territories]
       properties:
-        id: { type: string, format: uuid }
-        fullName: { type: string }
-        email: { type: string }
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
         territories:
           type: array
           items:
             $ref: '#/components/schemas/Territory'
-    Product:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        code: { type: string }
-    Message:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        product_id: { type: string, format: uuid }
-        title: { type: string }
-        body: { type: string }
-    Recommendation:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        doctor_id: { type: string, format: uuid }
-        message_id: { type: string, format: uuid }
-        score: { type: number }
-        explanation: { type: string }
-        created_at: { type: string, format: date-time }
-    RecommendationFeedback:
-      type: object
-      properties:
-        recommendation_id: { type: string, format: uuid }
-        status: { type: string }
-        reason: { type: string }
-      required: [recommendation_id, status]
-    AuditLog:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        actor_user_id: { type: string, format: uuid }
-        action: { type: string }
-        entity_type: { type: string }
-        entity_id: { type: string, format: uuid }
-        metadata: { type: object }
-        created_at: { type: string, format: date-time }

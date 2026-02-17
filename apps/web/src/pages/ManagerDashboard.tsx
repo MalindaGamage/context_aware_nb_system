@@ -114,6 +114,27 @@ export default function ManagerDashboard() {
         </div>
       </Card>
 
+      <Card>
+        <SectionTitle title="MR Territory Summary" subtitle="Assigned territory coverage for each MR." />
+        <div className="table-list">
+          {mrs.map((mr) => (
+            <div key={mr.id} className="table-row">
+              <div>
+                <strong>{mr.fullName}</strong>
+                <p className="muted">{mr.email}</p>
+              </div>
+              <div className="chips">
+                {mr.territories.length === 0 && <Pill>Unassigned</Pill>}
+                {mr.territories.map((territory) => (
+                  <Pill key={`${mr.id}-${territory.id}`}>{territory.name}</Pill>
+                ))}
+              </div>
+            </div>
+          ))}
+          {mrs.length === 0 && <p className="muted">No MR users available.</p>}
+        </div>
+      </Card>
+
       <div className="manager-grid">
         <Card>
           <SectionTitle title="Done Rate" />
