@@ -145,7 +145,9 @@ public class DoctorService {
         doctor.getTier(),
         doctor.getPriorityScore(),
         doctor.getTerritoryId(),
-        doctor.getNotes()
+        doctor.getNotes(),
+        doctor.getWhatsappNumber(),
+        doctor.getEmail()
     );
   }
 

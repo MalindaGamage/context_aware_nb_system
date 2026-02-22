@@ -51,6 +51,8 @@ CREATE TABLE doctors (
   location GEOMETRY(POINT, 4326),
   territory_id UUID REFERENCES territories(id) ON DELETE SET NULL,
   notes TEXT,
+  whatsapp_number VARCHAR(32),
+  email VARCHAR(255),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -6,6 +6,14 @@ export type Doctor = {
   priorityScore: number;
   territoryId: string | null;
   notes: string | null;
+  phoneNumber?: string | null;
+  phone?: string | null;
+  mobile?: string | null;
+  whatsappNumber?: string | null;
+  whatsapp_number?: string | null;
+  email?: string | null;
+  emailAddress?: string | null;
+  email_address?: string | null;
 };
 
 export type Territory = {

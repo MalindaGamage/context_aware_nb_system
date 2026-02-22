@@ -9,5 +9,7 @@ public record DoctorResponse(
     String tier,
     int priorityScore,
     UUID territoryId,
-    String notes
+    String notes,
+    String whatsappNumber,
+    String email
 ) {}

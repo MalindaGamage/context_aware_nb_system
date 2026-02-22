@@ -793,6 +793,54 @@ button.accent {
   border-bottom: 0;
 }
 
+.pn-contact-links {
+  display: grid;
+  gap: 6px;
+}
+
+.pn-contact-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 2px 0;
+  color: #0f6f9a;
+  text-decoration: none;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.pn-contact-link:hover {
+  color: #0a5a7d;
+  text-decoration: underline;
+}
+
+.pn-contact-link svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.pn-contact-link.disabled {
+  color: #8aa0b2;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.pn-contact-email-group {
+  display: grid;
+  gap: 2px;
+}
+
+.pn-contact-secondary {
+  width: fit-content;
+  font-size: 11px;
+  color: #60798e;
+  text-decoration: underline;
+}
+
 .pn-visit-row {
   display: flex;
   gap: 12px;

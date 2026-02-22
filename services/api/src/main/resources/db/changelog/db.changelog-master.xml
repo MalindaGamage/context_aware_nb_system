@@ -24,4 +24,8 @@
     <changeSet id="005-admin-config-and-audit-hardening" author="codex">
         <sqlFile path="db/changelog/005_admin_config_and_audit_hardening.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="006-doctor-contact-fields" author="codex">
+        <sqlFile path="db/changelog/006_doctor_contact_fields.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

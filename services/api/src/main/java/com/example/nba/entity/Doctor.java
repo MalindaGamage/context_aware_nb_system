@@ -36,6 +36,12 @@ public class Doctor {
   @Column
   private String notes;
 
+  @Column(name = "whatsapp_number")
+  private String whatsappNumber;
+
+  @Column
+  private String email;
+
   @Column(name = "created_at", nullable = false)
   private OffsetDateTime createdAt;
 
@@ -65,6 +71,12 @@ public class Doctor {
 
   public String getNotes() { return notes; }
   public void setNotes(String notes) { this.notes = notes; }
+
+  public String getWhatsappNumber() { return whatsappNumber; }
+  public void setWhatsappNumber(String whatsappNumber) { this.whatsappNumber = whatsappNumber; }
+
+  public String getEmail() { return email; }
+  public void setEmail(String email) { this.email = email; }
 
   public OffsetDateTime getCreatedAt() { return createdAt; }
   public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
