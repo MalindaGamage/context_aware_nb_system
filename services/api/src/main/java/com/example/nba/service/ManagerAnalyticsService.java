@@ -6,6 +6,7 @@ import com.example.nba.dto.ManagerAnalyticsResponse;
 import com.example.nba.dto.MissedHighPriorityResponse;
 import com.example.nba.dto.MrComplianceRowResponse;
 import com.example.nba.dto.TerritoryOverviewResponse;
+import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -75,8 +76,8 @@ public class ManagerAnalyticsService {
                  MAX(v.visit_time) AS last_visit_time
           FROM doctors d
           LEFT JOIN visits v ON v.doctor_id = d.id
-             AND (:fromTs IS NULL OR v.visit_time >= :fromTs)
-             AND (:toTs IS NULL OR v.visit_time < :toTs)
+             AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR v.visit_time >= CAST(:fromTs AS TIMESTAMP))
+             AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v.visit_time < CAST(:toTs AS TIMESTAMP))
           GROUP BY d.territory_id
         )
         SELECT t.id AS territory_id,
@@ -94,13 +95,13 @@ public class ManagerAnalyticsService {
         """;
 
     return jdbc.query(sql, params, (rs, rowNum) -> new TerritoryOverviewResponse(
-        UUID.fromString(rs.getString("territory_id")),
+        readUuid(rs, "territory_id"),
         rs.getString("territory_name"),
         rs.getString("territory_code"),
         rs.getLong("assigned_mr_count"),
         rs.getLong("doctor_count"),
         rs.getLong("visit_count"),
-        rs.getObject("last_visit_time") == null ? null : rs.getObject("last_visit_time", OffsetDateTime.class)
+        toOffsetDateTime(rs, "last_visit_time")
     ));
   }
 
@@ -109,11 +110,11 @@ public class ManagerAnalyticsService {
         WITH doctor_scope AS (
           SELECT d.id, d.tier
           FROM doctors d
-          WHERE (:territoryId IS NULL OR d.territory_id = :territoryId)
-            AND (:mrId IS NULL OR d.territory_id IN (
+          WHERE (CAST(:territoryId AS UUID) IS NULL OR d.territory_id = CAST(:territoryId AS UUID))
+            AND (CAST(:mrId AS UUID) IS NULL OR d.territory_id IN (
               SELECT ta.territory_id
               FROM territory_assignments ta
-              WHERE ta.user_id = :mrId
+              WHERE ta.user_id = CAST(:mrId AS UUID)
                 AND ta.starts_on <= CURRENT_DATE
                 AND (ta.ends_on IS NULL OR ta.ends_on >= CURRENT_DATE)
             ))
@@ -122,15 +123,15 @@ public class ManagerAnalyticsService {
           SELECT v.doctor_id, v.visit_time
           FROM visits v
           JOIN doctor_scope ds ON ds.id = v.doctor_id
-          WHERE (:mrId IS NULL OR v.user_id = :mrId)
-            AND (:fromTs IS NULL OR v.visit_time >= :fromTs)
-            AND (:toTs IS NULL OR v.visit_time < :toTs)
+          WHERE (CAST(:mrId AS UUID) IS NULL OR v.user_id = CAST(:mrId AS UUID))
+            AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR v.visit_time >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v.visit_time < CAST(:toTs AS TIMESTAMP))
         ),
         last_visit_scope AS (
           SELECT v.doctor_id, MAX(v.visit_time) AS last_visit_time
           FROM visits v
           JOIN doctor_scope ds ON ds.id = v.doctor_id
-          WHERE (:mrId IS NULL OR v.user_id = :mrId)
+          WHERE (CAST(:mrId AS UUID) IS NULL OR v.user_id = CAST(:mrId AS UUID))
           GROUP BY v.doctor_id
         )
         SELECT ds.tier AS tier,
@@ -162,11 +163,11 @@ public class ManagerAnalyticsService {
           SELECT d.id, d.full_name, d.tier, d.priority_score, d.territory_id
           FROM doctors d
           WHERE d.priority_score >= 80
-            AND (:territoryId IS NULL OR d.territory_id = :territoryId)
-            AND (:mrId IS NULL OR d.territory_id IN (
+            AND (CAST(:territoryId AS UUID) IS NULL OR d.territory_id = CAST(:territoryId AS UUID))
+            AND (CAST(:mrId AS UUID) IS NULL OR d.territory_id IN (
               SELECT ta.territory_id
               FROM territory_assignments ta
-              WHERE ta.user_id = :mrId
+              WHERE ta.user_id = CAST(:mrId AS UUID)
                 AND ta.starts_on <= CURRENT_DATE
                 AND (ta.ends_on IS NULL OR ta.ends_on >= CURRENT_DATE)
             ))
@@ -175,16 +176,16 @@ public class ManagerAnalyticsService {
           SELECT v.doctor_id, COUNT(*) AS visit_count
           FROM visits v
           JOIN doctor_scope ds ON ds.id = v.doctor_id
-          WHERE (:mrId IS NULL OR v.user_id = :mrId)
-            AND (:fromTs IS NULL OR v.visit_time >= :fromTs)
-            AND (:toTs IS NULL OR v.visit_time < :toTs)
+          WHERE (CAST(:mrId AS UUID) IS NULL OR v.user_id = CAST(:mrId AS UUID))
+            AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR v.visit_time >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v.visit_time < CAST(:toTs AS TIMESTAMP))
           GROUP BY v.doctor_id
         ),
         last_visit AS (
           SELECT v.doctor_id, MAX(v.visit_time) AS last_visit_time
           FROM visits v
           JOIN doctor_scope ds ON ds.id = v.doctor_id
-          WHERE (:mrId IS NULL OR v.user_id = :mrId)
+          WHERE (CAST(:mrId AS UUID) IS NULL OR v.user_id = CAST(:mrId AS UUID))
           GROUP BY v.doctor_id
         )
         SELECT ds.id AS doctor_id,
@@ -203,12 +204,12 @@ public class ManagerAnalyticsService {
         """;
 
     return jdbc.query(sql, params, (rs, rowNum) -> new MissedHighPriorityResponse(
-        UUID.fromString(rs.getString("doctor_id")),
+        readUuid(rs, "doctor_id"),
         rs.getString("full_name"),
         rs.getString("tier"),
         rs.getInt("priority_score"),
         rs.getString("territory_name"),
-        rs.getObject("last_visit_time") == null ? null : rs.getObject("last_visit_time", OffsetDateTime.class)
+        toOffsetDateTime(rs, "last_visit_time")
     ));
   }
 
@@ -224,10 +225,10 @@ public class ManagerAnalyticsService {
         FROM recommendation_feedback rf
         JOIN recommendations r ON r.id = rf.recommendation_id
         JOIN doctors d ON d.id = r.doctor_id
-        WHERE (:mrId IS NULL OR rf.created_by_user_id = :mrId)
-          AND (:territoryId IS NULL OR d.territory_id = :territoryId)
-          AND (:fromTs IS NULL OR rf.created_at >= :fromTs)
-          AND (:toTs IS NULL OR rf.created_at < :toTs)
+        WHERE (CAST(:mrId AS UUID) IS NULL OR rf.created_by_user_id = CAST(:mrId AS UUID))
+          AND (CAST(:territoryId AS UUID) IS NULL OR d.territory_id = CAST(:territoryId AS UUID))
+          AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR rf.created_at >= CAST(:fromTs AS TIMESTAMP))
+          AND (CAST(:toTs AS TIMESTAMP) IS NULL OR rf.created_at < CAST(:toTs AS TIMESTAMP))
         """;
 
     return jdbc.query(sql, params, rs -> {
@@ -258,21 +259,37 @@ public class ManagerAnalyticsService {
         JOIN users u ON u.id = rf.created_by_user_id
         JOIN recommendations r ON r.id = rf.recommendation_id
         JOIN doctors d ON d.id = r.doctor_id
-        WHERE (:mrId IS NULL OR rf.created_by_user_id = :mrId)
-          AND (:territoryId IS NULL OR d.territory_id = :territoryId)
-          AND (:fromTs IS NULL OR rf.created_at >= :fromTs)
-          AND (:toTs IS NULL OR rf.created_at < :toTs)
+        WHERE (CAST(:mrId AS UUID) IS NULL OR rf.created_by_user_id = CAST(:mrId AS UUID))
+          AND (CAST(:territoryId AS UUID) IS NULL OR d.territory_id = CAST(:territoryId AS UUID))
+          AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR rf.created_at >= CAST(:fromTs AS TIMESTAMP))
+          AND (CAST(:toTs AS TIMESTAMP) IS NULL OR rf.created_at < CAST(:toTs AS TIMESTAMP))
         GROUP BY u.id, u.full_name
         ORDER BY feedback_count DESC, u.full_name
         """;
 
     return jdbc.query(sql, params, (rs, rowNum) -> new MrComplianceRowResponse(
-        UUID.fromString(rs.getString("mr_id")),
+        readUuid(rs, "mr_id"),
         rs.getString("mr_name"),
         rs.getLong("feedback_count"),
         rs.getDouble("done_rate"),
         rs.getDouble("override_rate"),
         rs.getDouble("skipped_rate")
     ));
+  }
+
+  private OffsetDateTime toOffsetDateTime(ResultSet rs, String columnName) throws java.sql.SQLException {
+    Timestamp ts = rs.getTimestamp(columnName);
+    return ts == null ? null : ts.toInstant().atOffset(ZoneOffset.UTC);
+  }
+
+  private UUID readUuid(ResultSet rs, String columnName) throws java.sql.SQLException {
+    Object value = rs.getObject(columnName);
+    if (value == null) {
+      return null;
+    }
+    if (value instanceof UUID uuid) {
+      return uuid;
+    }
+    return UUID.fromString(String.valueOf(value));
   }
 }

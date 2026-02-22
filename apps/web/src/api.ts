@@ -655,7 +655,9 @@ export async function fetchTerritoryOverview(token: string, params: { from?: str
   const search = new URLSearchParams();
   if (params.from) search.set("from", params.from);
   if (params.to) search.set("to", params.to);
-  const res = await fetch(`${apiBase}/analytics/territories?${search.toString()}`, {
+  const query = search.toString();
+  const url = query ? `${apiBase}/analytics/territories?${query}` : `${apiBase}/analytics/territories`;
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Failed to load territory overview");
