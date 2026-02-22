@@ -11,5 +11,7 @@ public record DoctorResponse(
     UUID territoryId,
     String notes,
     String whatsappNumber,
-    String email
+    String email,
+    Double lat,
+    Double lon
 ) {}

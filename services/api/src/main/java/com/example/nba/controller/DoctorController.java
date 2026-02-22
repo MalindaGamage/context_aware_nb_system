@@ -2,8 +2,10 @@ package com.example.nba.controller;
 
 import com.example.nba.dto.DoctorResponse;
 import com.example.nba.dto.AssignDoctorTerritoryRequest;
+import com.example.nba.dto.CreateDoctorRequest;
 import com.example.nba.dto.PageMeta;
 import com.example.nba.dto.PageResponse;
+import com.example.nba.dto.UpdateDoctorRequest;
 import com.example.nba.service.DoctorService;
 import jakarta.validation.Valid;
 import java.util.Collection;
@@ -18,6 +20,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,6 +39,8 @@ public class DoctorController {
   public PageResponse<DoctorResponse> listDoctors(
       @RequestParam(required = false) String tier,
       @RequestParam(required = false) String specialty,
+      @RequestParam(required = false) Integer minPriorityScore,
+      @RequestParam(required = false) Integer maxPriorityScore,
       @RequestParam(required = false) UUID territoryId,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size,
@@ -46,6 +51,8 @@ public class DoctorController {
     Page<DoctorResponse> result = doctorService.listDoctors(
         tier,
         specialty,
+        minPriorityScore,
+        maxPriorityScore,
         territoryId,
         userId,
         isMr(jwt),
@@ -78,6 +85,20 @@ public class DoctorController {
         UUID.fromString(jwt.getSubject()),
         isMr(jwt)
     );
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @PostMapping("/api/v1/doctors")
+  public DoctorResponse createDoctor(@Valid @RequestBody CreateDoctorRequest request, @AuthenticationPrincipal Jwt jwt) {
+    return doctorService.createDoctor(request, UUID.fromString(jwt.getSubject()));
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @PutMapping("/api/v1/doctors/{id}")
+  public DoctorResponse updateDoctor(@PathVariable UUID id,
+                                     @Valid @RequestBody UpdateDoctorRequest request,
+                                     @AuthenticationPrincipal Jwt jwt) {
+    return doctorService.updateDoctor(id, request, UUID.fromString(jwt.getSubject()));
   }
 
   @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")

@@ -20,6 +20,16 @@ public final class DoctorSpecifications {
     return (root, query, cb) -> territoryId == null ? null : cb.equal(root.get("territoryId"), territoryId);
   }
 
+  public static Specification<Doctor> hasPriorityAtLeast(Integer minPriorityScore) {
+    return (root, query, cb) ->
+        minPriorityScore == null ? null : cb.greaterThanOrEqualTo(root.get("priorityScore"), minPriorityScore);
+  }
+
+  public static Specification<Doctor> hasPriorityAtMost(Integer maxPriorityScore) {
+    return (root, query, cb) ->
+        maxPriorityScore == null ? null : cb.lessThanOrEqualTo(root.get("priorityScore"), maxPriorityScore);
+  }
+
   public static Specification<Doctor> inTerritories(Collection<UUID> territoryIds) {
     return (root, query, cb) -> territoryIds == null ? null : root.get("territoryId").in(territoryIds);
   }

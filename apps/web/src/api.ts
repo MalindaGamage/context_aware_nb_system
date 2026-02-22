@@ -14,6 +14,8 @@ export type Doctor = {
   email?: string | null;
   emailAddress?: string | null;
   email_address?: string | null;
+  lat?: number | null;
+  lon?: number | null;
 };
 
 export type Territory = {
@@ -126,6 +128,21 @@ export type AssignTerritoryRequest = {
 export type AssignDoctorTerritoryRequest = {
   territoryId: string | null;
 };
+
+export type CreateDoctorRequest = {
+  fullName: string;
+  specialty?: string;
+  tier: string;
+  priorityScore: number;
+  territoryId?: string | null;
+  notes?: string;
+  whatsappNumber?: string;
+  email?: string;
+  lat?: number;
+  lon?: number;
+};
+
+export type UpdateDoctorRequest = CreateDoctorRequest;
 
 export type ScoringConfig = {
   id: string;
@@ -350,11 +367,21 @@ export async function login(username: string, password: string) {
 
 export async function fetchDoctors(
   token: string,
-  params: { tier?: string; specialty?: string; territoryId?: string; page?: number; size?: number }
+  params: {
+    tier?: string;
+    specialty?: string;
+    minPriorityScore?: number;
+    maxPriorityScore?: number;
+    territoryId?: string;
+    page?: number;
+    size?: number;
+  }
 ) {
   const search = new URLSearchParams();
   if (params.tier) search.set("tier", params.tier);
   if (params.specialty) search.set("specialty", params.specialty);
+  if (params.minPriorityScore !== undefined) search.set("minPriorityScore", String(params.minPriorityScore));
+  if (params.maxPriorityScore !== undefined) search.set("maxPriorityScore", String(params.maxPriorityScore));
   if (params.territoryId) search.set("territoryId", params.territoryId);
   search.set("page", String(params.page ?? 0));
   search.set("size", String(params.size ?? 100));
@@ -523,6 +550,26 @@ export async function assignDoctorTerritory(token: string, doctorId: string, req
     body: JSON.stringify(request),
   });
   if (!res.ok) throw new Error("Failed to assign doctor territory");
+  return (await res.json()) as Doctor;
+}
+
+export async function createDoctor(token: string, request: CreateDoctorRequest) {
+  const res = await fetch(`${apiBase}/doctors`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create doctor");
+  return (await res.json()) as Doctor;
+}
+
+export async function updateDoctor(token: string, doctorId: string, request: UpdateDoctorRequest) {
+  const res = await fetch(`${apiBase}/doctors/${doctorId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update doctor");
   return (await res.json()) as Doctor;
 }
 

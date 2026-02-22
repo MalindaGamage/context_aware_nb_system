@@ -28,4 +28,8 @@
     <changeSet id="006-doctor-contact-fields" author="codex">
         <sqlFile path="db/changelog/006_doctor_contact_fields.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="007-doctor-location-backfill" author="codex">
+        <sqlFile path="db/changelog/007_doctor_location_backfill.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

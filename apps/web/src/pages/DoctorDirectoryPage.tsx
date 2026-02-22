@@ -1,9 +1,21 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { fetchDoctors, type Doctor } from "../api";
+import {
+  createDoctor,
+  fetchDoctors,
+  fetchMyTerritories,
+  fetchNearbyDoctors,
+  fetchTerritories,
+  updateDoctor,
+  type Doctor,
+  type Territory,
+} from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { Card, Pill } from "../ui/components";
 
 const tierOrder = ["A", "B", "C"];
+const priorityBands = ["ALL", "HIGH", "MEDIUM", "LOW"] as const;
+type PriorityBand = (typeof priorityBands)[number];
+type LocationMode = "TERRITORY" | "NEARBY";
 
 function getWhatsappNumber(doctor: Doctor) {
   const value =
@@ -32,6 +44,11 @@ function toGmailComposeUrl(email: string) {
 
 function toMailtoUrl(email: string) {
   return `mailto:${encodeURIComponent(email)}`;
+}
+
+function formatGeoPoint(doctor: Doctor) {
+  if (doctor.lat == null || doctor.lon == null) return "Not set";
+  return `${doctor.lat.toFixed(5)}, ${doctor.lon.toFixed(5)}`;
 }
 
 function ContactLink({
@@ -87,29 +104,218 @@ function MailIcon() {
 }
 
 export default function DoctorDirectoryPage() {
-  const { token } = useAuth();
+  const { token, role } = useAuth();
   const [allDoctors, setAllDoctors] = useState<Doctor[]>([]);
   const [search, setSearch] = useState("");
+  const [specialtyFilter, setSpecialtyFilter] = useState("");
   const [tierFilter, setTierFilter] = useState("");
+  const [priorityBand, setPriorityBand] = useState<PriorityBand>("ALL");
+  const [myTerritories, setMyTerritories] = useState<Territory[]>([]);
+  const [territoryId, setTerritoryId] = useState("");
+  const [nearbyRadiusKm, setNearbyRadiusKm] = useState("5");
+  const [locationMode, setLocationMode] = useState<LocationMode>("TERRITORY");
+  const [status, setStatus] = useState("");
+  const [editingDoctorId, setEditingDoctorId] = useState<string | null>(null);
+  const [doctorForm, setDoctorForm] = useState({
+    fullName: "",
+    specialty: "",
+    tier: "B",
+    priorityScore: "70",
+    territoryId: "",
+    notes: "",
+    whatsappNumber: "",
+    email: "",
+    lat: "",
+    lon: "",
+  });
+
+  const isMr = role === "MR";
+  const canManageDoctors = role === "MANAGER" || role === "ADMIN";
+
+  const activeTerritoryId = useMemo(() => territoryId, [territoryId]);
+
+  const priorityRange = useMemo(() => {
+    if (priorityBand === "HIGH") return { min: 85, max: undefined };
+    if (priorityBand === "MEDIUM") return { min: 70, max: 84 };
+    if (priorityBand === "LOW") return { min: undefined, max: 69 };
+    return { min: undefined, max: undefined };
+  }, [priorityBand]);
 
   useEffect(() => {
     if (!token) return;
-    fetchDoctors(token, { size: 200 })
-      .then((result) => setAllDoctors(result.content))
-      .catch(() => setAllDoctors([]));
-  }, [token]);
+    const loadTerritories = isMr ? fetchMyTerritories(token) : fetchTerritories(token);
+    loadTerritories.then(setMyTerritories).catch(() => setMyTerritories([]));
+  }, [token, isMr]);
+
+  useEffect(() => {
+    if (!token) return;
+    if (locationMode !== "TERRITORY") return;
+    if (isMr && myTerritories.length === 0) {
+      setAllDoctors([]);
+      setStatus("No territories assigned to your MR profile.");
+      return;
+    }
+
+    fetchDoctors(token, {
+      tier: tierFilter || undefined,
+      specialty: specialtyFilter.trim() || undefined,
+      minPriorityScore: priorityRange.min,
+      maxPriorityScore: priorityRange.max,
+      territoryId: activeTerritoryId || undefined,
+      size: 200,
+    })
+      .then((result) => {
+        setAllDoctors(result.content);
+        setStatus("");
+      })
+      .catch(() => {
+        setAllDoctors([]);
+        setStatus("Failed to load doctors.");
+      });
+  }, [token, locationMode, tierFilter, specialtyFilter, priorityRange, activeTerritoryId, isMr, myTerritories.length]);
+
+  const loadNearby = async () => {
+    if (!token) return;
+    setLocationMode("NEARBY");
+    setStatus("Fetching nearby doctors...");
+    try {
+      const location = await new Promise<GeolocationPosition>((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("No geolocation"));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 7000 });
+      });
+      const radiusValue = Number(nearbyRadiusKm);
+      const radius = Number.isFinite(radiusValue) && radiusValue > 0 ? radiusValue : 5;
+      const nearby = await fetchNearbyDoctors(token, location.coords.latitude, location.coords.longitude, radius);
+      setAllDoctors(nearby);
+      setStatus("Nearby doctors loaded.");
+    } catch {
+      setAllDoctors([]);
+      setStatus("Failed to fetch nearby doctors. Check GPS permission.");
+    }
+  };
+
+  const switchToTerritoryMode = () => {
+    setLocationMode("TERRITORY");
+    setStatus("");
+  };
+
+  const resetDoctorForm = () => {
+    setEditingDoctorId(null);
+    setDoctorForm({
+      fullName: "",
+      specialty: "",
+      tier: "B",
+      priorityScore: "70",
+      territoryId: "",
+      notes: "",
+      whatsappNumber: "",
+      email: "",
+      lat: "",
+      lon: "",
+    });
+  };
+
+  const openEditDoctor = (doctor: Doctor) => {
+    setEditingDoctorId(doctor.id);
+    setDoctorForm({
+      fullName: doctor.fullName,
+      specialty: doctor.specialty || "",
+      tier: doctor.tier || "B",
+      priorityScore: String(doctor.priorityScore ?? 0),
+      territoryId: doctor.territoryId || "",
+      notes: doctor.notes || "",
+      whatsappNumber: getWhatsappNumber(doctor) || "",
+      email: getEmailAddress(doctor) || "",
+      lat: doctor.lat == null ? "" : String(doctor.lat),
+      lon: doctor.lon == null ? "" : String(doctor.lon),
+    });
+  };
+
+  const saveDoctor = async () => {
+    if (!token || !canManageDoctors) return;
+    if (!doctorForm.fullName.trim()) {
+      setStatus("Doctor name is required.");
+      return;
+    }
+
+    const priorityValue = Number(doctorForm.priorityScore);
+    if (!Number.isFinite(priorityValue) || priorityValue < 0 || priorityValue > 100) {
+      setStatus("Priority score must be between 0 and 100.");
+      return;
+    }
+
+    const hasLat = doctorForm.lat.trim() !== "";
+    const hasLon = doctorForm.lon.trim() !== "";
+    if (hasLat !== hasLon) {
+      setStatus("Both latitude and longitude are required when setting location.");
+      return;
+    }
+    const latValue = hasLat ? Number(doctorForm.lat) : undefined;
+    const lonValue = hasLon ? Number(doctorForm.lon) : undefined;
+    if (hasLat && (!Number.isFinite(latValue) || !Number.isFinite(lonValue))) {
+      setStatus("Latitude and longitude must be numeric values.");
+      return;
+    }
+
+    const payload = {
+      fullName: doctorForm.fullName.trim(),
+      specialty: doctorForm.specialty.trim() || undefined,
+      tier: doctorForm.tier.trim().toUpperCase(),
+      priorityScore: Math.round(priorityValue),
+      territoryId: doctorForm.territoryId || null,
+      notes: doctorForm.notes.trim() || undefined,
+      whatsappNumber: doctorForm.whatsappNumber.trim() || undefined,
+      email: doctorForm.email.trim() || undefined,
+      lat: latValue,
+      lon: lonValue,
+    };
+
+    try {
+      if (editingDoctorId) {
+        await updateDoctor(token, editingDoctorId, payload);
+        setStatus("Doctor updated successfully.");
+      } else {
+        await createDoctor(token, payload);
+        setStatus("Doctor created and assigned.");
+      }
+      resetDoctorForm();
+      if (locationMode === "TERRITORY") {
+        const result = await fetchDoctors(token, {
+          tier: tierFilter || undefined,
+          specialty: specialtyFilter.trim() || undefined,
+          minPriorityScore: priorityRange.min,
+          maxPriorityScore: priorityRange.max,
+          territoryId: activeTerritoryId || undefined,
+          size: 200,
+        });
+        setAllDoctors(result.content);
+      }
+    } catch {
+      setStatus("Failed to save doctor.");
+    }
+  };
 
   const doctors = useMemo(() => {
     let filtered = allDoctors;
     if (tierFilter) filtered = filtered.filter((doctor) => doctor.tier === tierFilter);
+    if (specialtyFilter.trim()) {
+      const specialtyQuery = specialtyFilter.trim().toLowerCase();
+      filtered = filtered.filter((doctor) => (doctor.specialty || "").toLowerCase().includes(specialtyQuery));
+    }
+    if (priorityBand === "HIGH") filtered = filtered.filter((doctor) => doctor.priorityScore >= 85);
+    if (priorityBand === "MEDIUM") filtered = filtered.filter((doctor) => doctor.priorityScore >= 70 && doctor.priorityScore < 85);
+    if (priorityBand === "LOW") filtered = filtered.filter((doctor) => doctor.priorityScore < 70);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       filtered = filtered.filter((doctor) =>
         doctor.fullName.toLowerCase().includes(q) || (doctor.specialty || "").toLowerCase().includes(q)
       );
     }
-    return filtered;
-  }, [allDoctors, search, tierFilter]);
+    return [...filtered].sort((a, b) => b.priorityScore - a.priorityScore);
+  }, [allDoctors, search, tierFilter, specialtyFilter, priorityBand]);
 
   if (!token) return null;
 
@@ -118,25 +324,145 @@ export default function DoctorDirectoryPage() {
       <div className="pn-header">
         <div>
           <h1>Doctor Directory</h1>
-          <p>{doctors.length} physicians across all territories</p>
+          <p>{doctors.length} physicians in {locationMode === "NEARBY" ? "nearby segment" : "assigned territory segment"}</p>
         </div>
       </div>
 
-      <div className="pn-directory-filters">
-        <input
-          placeholder="Search doctors by name or specialty..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <div className="chips">
-          <button className={`pn-chip-btn ${tierFilter === "" ? "active" : ""}`} onClick={() => setTierFilter("")}>All</button>
-          {tierOrder.map((tier) => (
-            <button key={tier} className={`pn-chip-btn ${tierFilter === tier ? "active" : ""}`} onClick={() => setTierFilter(tier)}>
-              Tier {tier}
+      {canManageDoctors && (
+        <Card>
+          <h3>{editingDoctorId ? "Edit Doctor" : "Add Doctor"}</h3>
+          <div className="inline-form">
+            <input
+              placeholder="Full name"
+              value={doctorForm.fullName}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, fullName: event.target.value }))}
+            />
+            <input
+              placeholder="Specialty"
+              value={doctorForm.specialty}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, specialty: event.target.value }))}
+            />
+            <input
+              placeholder="Tier (A/B/C)"
+              value={doctorForm.tier}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, tier: event.target.value }))}
+            />
+            <input
+              placeholder="Priority 0-100"
+              type="number"
+              min={0}
+              max={100}
+              value={doctorForm.priorityScore}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, priorityScore: event.target.value }))}
+            />
+            <select
+              value={doctorForm.territoryId}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, territoryId: event.target.value }))}
+            >
+              <option value="">Unassigned</option>
+              {myTerritories.map((territory) => (
+                <option key={territory.id} value={territory.id}>
+                  {territory.name}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="WhatsApp number"
+              value={doctorForm.whatsappNumber}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, whatsappNumber: event.target.value }))}
+            />
+            <input
+              placeholder="Email"
+              value={doctorForm.email}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, email: event.target.value }))}
+            />
+            <input
+              placeholder="Latitude"
+              value={doctorForm.lat}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, lat: event.target.value }))}
+            />
+            <input
+              placeholder="Longitude"
+              value={doctorForm.lon}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, lon: event.target.value }))}
+            />
+            <input
+              placeholder="Notes"
+              value={doctorForm.notes}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, notes: event.target.value }))}
+            />
+          </div>
+          <div className="row-actions">
+            <button className="pn-chip-btn active" onClick={() => void saveDoctor()}>
+              {editingDoctorId ? "Update Doctor" : "Create Doctor"}
             </button>
-          ))}
+            {editingDoctorId && (
+              <button className="pn-chip-btn" onClick={resetDoctorForm}>
+                Cancel Edit
+              </button>
+            )}
+          </div>
+        </Card>
+      )}
+
+      <div className="pn-directory-filters">
+        <div className="pn-directory-search-block">
+          <input
+            placeholder="Search doctors by name or specialty..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <input
+            placeholder="Specialty segment (e.g. Cardiology)"
+            value={specialtyFilter}
+            onChange={(event) => setSpecialtyFilter(event.target.value)}
+          />
+        </div>
+        <div className="pn-directory-chips">
+          <div className="chips">
+            <button className={`pn-chip-btn ${tierFilter === "" ? "active" : ""}`} onClick={() => setTierFilter("")}>All tiers</button>
+            {tierOrder.map((tier) => (
+              <button key={tier} className={`pn-chip-btn ${tierFilter === tier ? "active" : ""}`} onClick={() => setTierFilter(tier)}>
+                Tier {tier}
+              </button>
+            ))}
+          </div>
+          <div className="chips">
+            {priorityBands.map((band) => (
+              <button
+                key={band}
+                className={`pn-chip-btn ${priorityBand === band ? "active" : ""}`}
+                onClick={() => setPriorityBand(band)}
+              >
+                {band === "ALL" ? "All priorities" : band}
+              </button>
+            ))}
+          </div>
+          <div className="pn-directory-location-controls">
+            <select value={activeTerritoryId} onChange={(event) => setTerritoryId(event.target.value)} disabled={locationMode === "NEARBY"}>
+              <option value="">All my territories</option>
+              {myTerritories.map((territory) => (
+                <option key={territory.id} value={territory.id}>
+                  {territory.name}
+                </option>
+              ))}
+            </select>
+            <select value={nearbyRadiusKm} onChange={(event) => setNearbyRadiusKm(event.target.value)}>
+              <option value="2">2 km</option>
+              <option value="5">5 km</option>
+              <option value="10">10 km</option>
+              <option value="20">20 km</option>
+            </select>
+            <button className={`pn-chip-btn ${locationMode === "TERRITORY" ? "active" : ""}`} onClick={switchToTerritoryMode}>
+              Territory
+            </button>
+            <button className={`pn-chip-btn ${locationMode === "NEARBY" ? "active" : ""}`} onClick={() => void loadNearby()}>
+              Nearby
+            </button>
+          </div>
         </div>
       </div>
+      {status && <p className="muted">{status}</p>}
 
       <Card className="pn-table-card">
         <table className="pn-table">
@@ -147,10 +473,17 @@ export default function DoctorDirectoryPage() {
               <th>Tier</th>
               <th>Territory</th>
               <th>Priority</th>
+              <th>Location</th>
               <th>Contact</th>
+              {canManageDoctors && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
+            {doctors.length === 0 ? (
+              <tr>
+                <td colSpan={canManageDoctors ? 8 : 7} className="muted">No doctors found for current segmentation.</td>
+              </tr>
+            ) : null}
             {doctors.map((doctor) => {
               const whatsappNumber = getWhatsappNumber(doctor);
               const emailAddress = getEmailAddress(doctor);
@@ -165,6 +498,7 @@ export default function DoctorDirectoryPage() {
                   <td><Pill>{doctor.tier}</Pill></td>
                   <td>{doctor.territoryId ? "Assigned" : "Unassigned"}</td>
                   <td>{doctor.priorityScore}</td>
+                  <td>{formatGeoPoint(doctor)}</td>
                   <td>
                     <div className="pn-contact-links">
                       <ContactLink
@@ -190,6 +524,13 @@ export default function DoctorDirectoryPage() {
                       </div>
                     </div>
                   </td>
+                  {canManageDoctors && (
+                    <td>
+                      <button className="pn-chip-btn" onClick={() => openEditDoctor(doctor)}>
+                        Edit
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}

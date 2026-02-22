@@ -57,6 +57,9 @@ export default function MrDashboard() {
   const [tier, setTier] = useState("");
   const [specialty, setSpecialty] = useState("");
   const [territoryId, setTerritoryId] = useState("");
+  const [priorityBand, setPriorityBand] = useState("ALL");
+  const [nearbyRadiusKm, setNearbyRadiusKm] = useState("5");
+  const [locationSegment, setLocationSegment] = useState<"TERRITORY" | "NEARBY">("TERRITORY");
   const [visitTime, setVisitTime] = useState(() => new Date().toISOString().slice(0, 16));
   const [outcome, setOutcome] = useState("");
   const [notes, setNotes] = useState("");
@@ -88,9 +91,28 @@ export default function MrDashboard() {
   useEffect(() => {
     if (!token) return;
     fetchDoctors(token, { tier, specialty, territoryId: activeTerritoryId })
-      .then((data) => setDoctors(data.content))
+      .then((data) => {
+        setDoctors(data.content);
+        setLocationSegment("TERRITORY");
+      })
       .catch(() => setDoctors([]));
   }, [token, tier, specialty, activeTerritoryId]);
+
+  const segmentedDoctors = useMemo(() => {
+    const filtered = doctors.filter((doctor) => {
+      if (priorityBand === "HIGH") return doctor.priorityScore >= 85;
+      if (priorityBand === "MEDIUM") return doctor.priorityScore >= 70 && doctor.priorityScore < 85;
+      if (priorityBand === "LOW") return doctor.priorityScore < 70;
+      return true;
+    });
+    return [...filtered].sort((a, b) => b.priorityScore - a.priorityScore);
+  }, [doctors, priorityBand]);
+
+  useEffect(() => {
+    if (!selectedDoctor) return;
+    const stillVisible = segmentedDoctors.some((doctor) => doctor.id === selectedDoctor.id);
+    if (!stillVisible) setSelectedDoctor(null);
+  }, [selectedDoctor, segmentedDoctors]);
 
   useEffect(() => {
     if (!token || !selectedDoctor) {
@@ -346,8 +368,11 @@ export default function MrDashboard() {
         }
         navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 7000 });
       });
-      const nearby = await fetchNearbyDoctors(token, location.coords.latitude, location.coords.longitude, 5);
+      const radiusValue = Number(nearbyRadiusKm);
+      const radius = Number.isFinite(radiusValue) && radiusValue > 0 ? radiusValue : 5;
+      const nearby = await fetchNearbyDoctors(token, location.coords.latitude, location.coords.longitude, radius);
       setDoctors(nearby);
+      setLocationSegment("NEARBY");
       setStatus("Nearby doctors loaded");
     } catch {
       setStatus("Failed to fetch nearby doctors. Check GPS permission.");
@@ -530,10 +555,18 @@ export default function MrDashboard() {
       </Card>
 
       <Card>
-        <SectionTitle title="Doctor Directory" subtitle="Filter by tier, specialty, and territory." />
+        <SectionTitle title="Doctor Directory" subtitle="Segment by tier, priority, specialty, and location." />
         <div className="filters">
           <Field label="Tier">
             <input placeholder="A / B" value={tier} onChange={(e) => setTier(e.target.value)} />
+          </Field>
+          <Field label="Priority">
+            <select value={priorityBand} onChange={(e) => setPriorityBand(e.target.value)}>
+              <option value="ALL">All priorities</option>
+              <option value="HIGH">High (85+)</option>
+              <option value="MEDIUM">Medium (70-84)</option>
+              <option value="LOW">Low (&lt;70)</option>
+            </select>
           </Field>
           <Field label="Specialty">
             <input placeholder="Cardiology" value={specialty} onChange={(e) => setSpecialty(e.target.value)} />
@@ -548,22 +581,35 @@ export default function MrDashboard() {
               ))}
             </select>
           </Field>
+          <Field label="Nearby Radius (km)">
+            <select value={nearbyRadiusKm} onChange={(e) => setNearbyRadiusKm(e.target.value)}>
+              <option value="2">2</option>
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+            </select>
+          </Field>
           <Button className="accent" onClick={handleNearby}>
             Nearby
           </Button>
         </div>
+        <div className="chips">
+          <Pill>Mode: {locationSegment === "NEARBY" ? "Nearby" : "Assigned territory"}</Pill>
+          <Pill>Doctors: {segmentedDoctors.length}</Pill>
+        </div>
 
         <div className="grid">
           <div className="list">
-            {doctors.map((doc) => (
+            {segmentedDoctors.map((doc) => (
               <button key={doc.id} className="list-item" onClick={() => setSelectedDoctor(doc)}>
                 <div>
                   <strong>{doc.fullName}</strong>
                   <span>{doc.specialty || "General"}</span>
                 </div>
-                <Pill>Tier {doc.tier}</Pill>
+                <Pill>Tier {doc.tier} | P{doc.priorityScore}</Pill>
               </button>
             ))}
+            {segmentedDoctors.length === 0 && <p className="muted">No doctors match the current segmentation.</p>}
           </div>
           <div className="detail">
             {selectedDoctor ? (
