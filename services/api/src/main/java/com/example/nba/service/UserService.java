@@ -174,14 +174,15 @@ public class UserService {
     territoryRepository.findById(request.territoryId())
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Territory not found"));
 
-    boolean alreadyAssigned = territoryAssignmentRepository.existsByUserIdAndTerritoryIdAndEndsOnIsNull(
-        userId, request.territoryId());
+    LocalDate effectiveStartDate = request.startsOn() != null ? request.startsOn() : LocalDate.now();
+    boolean alreadyAssigned = territoryAssignmentRepository.existsActiveAssignmentOnDate(
+        userId, request.territoryId(), effectiveStartDate);
     if (!alreadyAssigned) {
       TerritoryAssignment assignment = new TerritoryAssignment();
       assignment.setId(UUID.randomUUID());
       assignment.setUserId(userId);
       assignment.setTerritoryId(request.territoryId());
-      assignment.setStartsOn(request.startsOn() != null ? request.startsOn() : LocalDate.now());
+      assignment.setStartsOn(effectiveStartDate);
       assignment.setCreatedAt(OffsetDateTime.now());
       territoryAssignmentRepository.save(assignment);
     }
@@ -195,10 +196,28 @@ public class UserService {
     if (!allowedRoles.contains(existing.getRole())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Role not allowed");
     }
-    List<TerritoryAssignment> assignments = territoryAssignmentRepository.findByUserId(userId).stream()
-        .filter(item -> item.getTerritoryId().equals(territoryId))
-        .collect(Collectors.toList());
-    territoryAssignmentRepository.deleteAll(assignments);
+    LocalDate today = LocalDate.now();
+    List<TerritoryAssignment> assignments = territoryAssignmentRepository.findByUserIdAndTerritoryId(userId, territoryId);
+    List<TerritoryAssignment> toDelete = new ArrayList<>();
+    List<TerritoryAssignment> toClose = new ArrayList<>();
+
+    for (TerritoryAssignment assignment : assignments) {
+      if (assignment.getStartsOn().isAfter(today)) {
+        toDelete.add(assignment);
+        continue;
+      }
+      if (assignment.getEndsOn() == null || assignment.getEndsOn().isAfter(today)) {
+        assignment.setEndsOn(today);
+        toClose.add(assignment);
+      }
+    }
+
+    if (!toClose.isEmpty()) {
+      territoryAssignmentRepository.saveAll(toClose);
+    }
+    if (!toDelete.isEmpty()) {
+      territoryAssignmentRepository.deleteAll(toDelete);
+    }
     return listTerritoriesForUser(userId);
   }
 

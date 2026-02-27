@@ -8,6 +8,7 @@ import com.example.nba.dto.MrComplianceRowResponse;
 import com.example.nba.dto.TerritoryOverviewResponse;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -36,10 +37,10 @@ public class ManagerAnalyticsService {
     Timestamp toTs = to == null ? null : Timestamp.from(to.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC));
 
     MapSqlParameterSource params = new MapSqlParameterSource()
-        .addValue("mrId", mrId)
-        .addValue("territoryId", territoryId)
-        .addValue("fromTs", fromTs)
-        .addValue("toTs", toTs);
+        .addValue("mrId", mrId, Types.OTHER)
+        .addValue("territoryId", territoryId, Types.OTHER)
+        .addValue("fromTs", fromTs, Types.TIMESTAMP)
+        .addValue("toTs", toTs, Types.TIMESTAMP);
 
     List<CoverageTierAnalyticsResponse> coverage = queryCoverageByTier(params);
     List<MissedHighPriorityResponse> missed = queryMissedHighPriority(params);
@@ -50,20 +51,27 @@ public class ManagerAnalyticsService {
   }
 
   public List<TerritoryOverviewResponse> territoryOverview(LocalDate from, LocalDate to) {
+    if (from != null && to != null && from.isAfter(to)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from must be before or equal to to");
+    }
+
     Timestamp fromTs = from == null ? null : Timestamp.from(from.atStartOfDay().toInstant(ZoneOffset.UTC));
     Timestamp toTs = to == null ? null : Timestamp.from(to.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC));
 
     MapSqlParameterSource params = new MapSqlParameterSource()
-        .addValue("fromTs", fromTs)
-        .addValue("toTs", toTs);
+        .addValue("fromTs", fromTs, Types.TIMESTAMP)
+        .addValue("toTs", toTs, Types.TIMESTAMP);
 
     String sql = """
         WITH active_assignments AS (
-          SELECT territory_id, COUNT(DISTINCT user_id) AS assigned_mr_count
-          FROM territory_assignments
-          WHERE starts_on <= CURRENT_DATE
-            AND (ends_on IS NULL OR ends_on >= CURRENT_DATE)
-          GROUP BY territory_id
+          SELECT ta.territory_id, COUNT(DISTINCT ta.user_id) AS assigned_mr_count
+          FROM territory_assignments ta
+          JOIN user_roles ur ON ur.user_id = ta.user_id
+          JOIN roles r ON r.id = ur.role_id
+          WHERE r.name = 'MR'
+            AND ta.starts_on <= CURRENT_DATE
+            AND (ta.ends_on IS NULL OR ta.ends_on >= CURRENT_DATE)
+          GROUP BY ta.territory_id
         ),
         doctor_counts AS (
           SELECT territory_id, COUNT(*) AS doctor_count
