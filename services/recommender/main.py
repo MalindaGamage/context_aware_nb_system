@@ -23,6 +23,15 @@ class RecommendationItem(BaseModel):
     factors: list[RecommendationFactor]
 
 
+def compact_text(value: str | None, limit: int = 80) -> str:
+    if not value:
+        return ""
+    normalized = " ".join(value.strip().split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
+
+
 def load_scoring_config(cur: psycopg.Cursor[Any]) -> tuple[dict[str, float], dict[str, str], list[dict[str, Any]]]:
     cur.execute(
         """
@@ -87,19 +96,58 @@ def recommendations(
             cur.execute(
                 """
                 SELECT d.id::text,
+                       d.full_name,
                        d.tier,
                        d.priority_score,
+                       d.notes,
+                       t.name as territory_name,
                        lv.visit_time,
                        lv.follow_up_required
+                       , lv.outcome
+                       , lv.notes
+                       , rf.status
+                       , rf.reason
+                       , rf.rescheduled_to
+                       , stats.visit_count_90d
+                       , stats.feedback_count_90d
                 FROM doctors d
+                LEFT JOIN territories t ON t.id = d.territory_id
                 LEFT JOIN LATERAL (
-                    SELECT v.visit_time, v.follow_up_required
+                    SELECT v.visit_time, v.follow_up_required, v.outcome, v.notes
                     FROM visits v
                     WHERE v.user_id = %s::uuid
                       AND v.doctor_id = d.id
                     ORDER BY v.visit_time DESC
                     LIMIT 1
                 ) lv ON true
+                LEFT JOIN LATERAL (
+                    SELECT f.status, f.reason, f.rescheduled_to
+                    FROM recommendation_feedback f
+                    JOIN recommendations r ON r.id = f.recommendation_id
+                    WHERE f.created_by_user_id = %s::uuid
+                      AND r.doctor_id = d.id
+                    ORDER BY f.created_at DESC
+                    LIMIT 1
+                ) rf ON true
+                LEFT JOIN LATERAL (
+                    SELECT
+                      (
+                        SELECT COUNT(*)
+                        FROM visits v90
+                        WHERE v90.user_id = %s::uuid
+                          AND v90.doctor_id = d.id
+                          AND v90.visit_time >= CURRENT_TIMESTAMP - INTERVAL '90 days'
+                      ) AS visit_count_90d,
+                      (
+                        SELECT COUNT(*)
+                        FROM recommendation_feedback f90
+                        JOIN recommendations r90 ON r90.id = f90.recommendation_id
+                        WHERE f90.created_by_user_id = %s::uuid
+                          AND r90.user_id = %s::uuid
+                          AND r90.doctor_id = d.id
+                          AND f90.created_at >= CURRENT_TIMESTAMP - INTERVAL '90 days'
+                      ) AS feedback_count_90d
+                ) stats ON true
                 WHERE d.territory_id IN (
                     SELECT ta.territory_id
                     FROM territory_assignments ta
@@ -108,12 +156,28 @@ def recommendations(
                       AND (ta.ends_on IS NULL OR ta.ends_on >= CURRENT_DATE)
                 )
                 """,
-                (user_id, user_id),
+                (user_id, user_id, user_id, user_id, user_id, user_id),
             )
             rows = cur.fetchall()
 
     scored: list[dict[str, Any]] = []
-    for doctor_id, tier, priority_score, last_visit_time, follow_up_required in rows:
+    for (
+        doctor_id,
+        doctor_name,
+        tier,
+        priority_score,
+        doctor_notes,
+        territory_name,
+        last_visit_time,
+        follow_up_required,
+        last_visit_outcome,
+        last_visit_notes,
+        last_feedback_status,
+        last_feedback_reason,
+        rescheduled_to,
+        visit_count_90d,
+        feedback_count_90d,
+    ) in rows:
         tier_norm = (tier or "").strip().upper()
         priority = float(max(0, min(priority_score or 0, 100)))
 
@@ -136,6 +200,47 @@ def recommendations(
         follow_up_points = float(weights.get("followUpBonus", 20.0)) if bool(follow_up_required) else 0.0
         recent_visit_days = int(weights.get("recentVisitDays", 7))
         saturation_penalty = float(weights.get("recentVisitPenalty", -10.0)) if days_since <= recent_visit_days else 0.0
+        visit_count_recent = int(visit_count_90d or 0)
+        feedback_count_recent = int(feedback_count_90d or 0)
+
+        context_bonus = 0.0
+        context_snippets: list[str] = []
+
+        if visit_count_recent == 0:
+            context_bonus += 8.0
+            context_snippets.append("no visits logged in the last 90 days")
+        elif visit_count_recent <= 1:
+            context_bonus += 4.0
+            context_snippets.append(f"only {visit_count_recent} visit logged in the last 90 days")
+
+        if last_feedback_status == "RESCHEDULED":
+            context_bonus += 6.0
+            reason_summary = compact_text(last_feedback_reason, 50)
+            if rescheduled_to and rescheduled_to <= now:
+                context_bonus += 6.0
+                context_snippets.append("last recommendation was rescheduled and is now due")
+            elif reason_summary:
+                context_snippets.append(f"last recommendation was rescheduled: {reason_summary}")
+        elif last_feedback_status == "SKIPPED":
+            context_bonus += 3.0
+            reason_summary = compact_text(last_feedback_reason, 50)
+            context_snippets.append(f"last recommendation was skipped: {reason_summary or 'reason not recorded'}")
+        elif last_feedback_status == "DONE":
+            context_snippets.append("last recommendation for this doctor was completed")
+
+        doctor_note_summary = compact_text(doctor_notes, 60)
+        if doctor_note_summary:
+            context_bonus += 2.0
+            context_snippets.append(f"doctor notes: {doctor_note_summary}")
+
+        last_visit_note_summary = compact_text(last_visit_notes, 60)
+        if last_visit_outcome:
+            context_snippets.append(f"last visit outcome: {compact_text(last_visit_outcome, 40)}")
+        if last_visit_note_summary:
+            context_snippets.append(f"last visit notes: {last_visit_note_summary}")
+
+        if territory_name:
+            context_snippets.append(f"territory: {territory_name}")
 
         segment_bonus_total = 0.0
         segment_tags: list[str] = []
@@ -155,7 +260,13 @@ def recommendations(
                 segment_tags.append(segment_name)
 
         total_score = round(
-            tier_points + priority_points + recency_points + follow_up_points + saturation_penalty + segment_bonus_total,
+            tier_points
+            + priority_points
+            + recency_points
+            + follow_up_points
+            + saturation_penalty
+            + segment_bonus_total
+            + context_bonus,
             2,
         )
 
@@ -167,6 +278,16 @@ def recommendations(
                 key="follow_up_required",
                 value="yes" if bool(follow_up_required) else "no",
                 contribution=follow_up_points,
+            ),
+            RecommendationFactor(
+                key="coverage_gap_90d",
+                value=str(visit_count_recent),
+                contribution=8.0 if visit_count_recent == 0 else 4.0 if visit_count_recent <= 1 else 0.0,
+            ),
+            RecommendationFactor(
+                key="feedback_activity_90d",
+                value=str(feedback_count_recent),
+                contribution=0.0,
             ),
         ]
         if saturation_penalty < 0:
@@ -183,6 +304,14 @@ def recommendations(
                     contribution=segment_bonus_total,
                 )
             )
+        if context_bonus != 0:
+            factors.append(
+                RecommendationFactor(
+                    key="retrieved_context",
+                    value=" | ".join(context_snippets[:3]) if context_snippets else doctor_name,
+                    contribution=round(context_bonus, 2),
+                )
+            )
 
         top = sorted(factors, key=lambda item: abs(item.contribution), reverse=True)[:3]
         template = str(messages.get("templateTopDrivers", "{driver1}, {driver2}, {driver3}"))
@@ -193,6 +322,8 @@ def recommendations(
             explanation = explanation.replace(token, value)
         if not explanation.strip():
             explanation = str(messages.get("templateFallback", "Prioritized by active segment and recency"))
+        if context_snippets:
+            explanation = f"{explanation}. Context: {'; '.join(context_snippets[:3])}."
         scored.append(
             {
                 "doctor_id": doctor_id,

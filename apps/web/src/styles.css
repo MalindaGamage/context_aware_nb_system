@@ -718,6 +718,24 @@ button.accent {
   font-weight: 600;
 }
 
+.pn-driver-list,
+.pn-feedback-composer {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pn-driver-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e1e8ee;
+}
+
 .pn-reco-actions {
   display: grid;
   align-content: space-between;

@@ -74,6 +74,13 @@ type CommuteSummary = {
   trafficText: string;
 };
 
+type FeedbackComposer = {
+  recommendationId: string;
+  status: "DONE" | "SKIPPED" | "RESCHEDULED";
+  reason: string;
+  rescheduledTo: string;
+};
+
 const LOCATION_PRIVACY_KEY = "nba_mr_location_privacy";
 const STORAGE_MODE_KEY = "nba_mr_location_storage";
 const LAST_LOCATION_KEY = "nba_mr_location_snapshot";
@@ -153,11 +160,12 @@ export default function NbaDashboardPage() {
   const [visitCount, setVisitCount] = useState(0);
   const [coverageScore, setCoverageScore] = useState(0);
   const [acceptanceRate, setAcceptanceRate] = useState(0);
-  const [syncStrategy] = useState<SyncConflictStrategy>("SERVER_WINS");
+  const [syncStrategy, setSyncStrategy] = useState<SyncConflictStrategy>("SERVER_WINS");
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [status, setStatus] = useState("");
   const [queuedVisits, setQueuedVisits] = useState(0);
   const [queuedFeedback, setQueuedFeedback] = useState(0);
+  const [feedbackComposer, setFeedbackComposer] = useState<FeedbackComposer | null>(null);
   const [liveTrackingEnabled, setLiveTrackingEnabled] = useState(false);
   const [locationConsent, setLocationConsent] = useState(() => readBooleanPreference(LOCATION_PRIVACY_KEY));
   const [storageMode, setStorageMode] = useState<StorageMode>(() => readStorageMode());
@@ -825,11 +833,24 @@ export default function NbaDashboardPage() {
       await submitRecommendationFeedback(token, recommendation.recommendationId, payload);
       setStatus("Feedback submitted");
       setAcceptanceRate((value) => Math.min(100, value + 2));
+      setFeedbackComposer(null);
+      await loadRecommendations(token);
+      await refreshOffline();
     } catch {
       await queueFeedback(payload);
       await refreshOffline();
       setStatus("Network issue: feedback queued");
+      setFeedbackComposer(null);
     }
+  };
+
+  const openFeedbackComposer = (recommendation: NbaRecommendation, status: FeedbackComposer["status"]) => {
+    setFeedbackComposer({
+      recommendationId: recommendation.recommendationId,
+      status,
+      reason: "",
+      rescheduledTo: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+    });
   };
 
   const syncNow = async () => {
@@ -874,6 +895,27 @@ export default function NbaDashboardPage() {
       map.setZoom(13);
       setSearchAnchor(location);
       setStatus(`Showing map results for ${results[0].formatted_address}`);
+    });
+  };
+
+  const handleSubmitFeedbackComposer = async (recommendation: NbaRecommendation) => {
+    if (!feedbackComposer || feedbackComposer.recommendationId !== recommendation.recommendationId) {
+      return;
+    }
+
+    const trimmedReason = feedbackComposer.reason.trim();
+    if ((feedbackComposer.status === "SKIPPED" || feedbackComposer.status === "RESCHEDULED") && !trimmedReason) {
+      setStatus("Reason is required for skipped or rescheduled feedback");
+      return;
+    }
+
+    await submitFeedback(recommendation, {
+      status: feedbackComposer.status,
+      reason: trimmedReason || undefined,
+      rescheduledTo:
+        feedbackComposer.status === "RESCHEDULED" && feedbackComposer.rescheduledTo
+          ? new Date(feedbackComposer.rescheduledTo).toISOString()
+          : undefined,
     });
   };
 
@@ -1139,6 +1181,15 @@ export default function NbaDashboardPage() {
                     <Pill key={`${item.recommendationId}-${driver.key}`}>{driver.key}</Pill>
                   ))}
                 </div>
+                <div className="pn-driver-list">
+                  {item.drivers.slice(0, 4).map((driver) => (
+                    <div key={`${item.recommendationId}-${driver.key}-detail`} className="pn-driver-row">
+                      <strong>{driver.key}</strong>
+                      <span>{driver.value}</span>
+                      <Pill>{driver.contribution.toFixed(1)}</Pill>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="pn-reco-actions">
@@ -1147,20 +1198,9 @@ export default function NbaDashboardPage() {
                 <span>NBA Score</span>
               </div>
               <div className="row-actions">
-                <Button onClick={() => void submitFeedback(item, { status: "DONE", reason: "Accepted action" })}>Accept</Button>
-                <Button
-                  className="ghost"
-                  onClick={() =>
-                    void submitFeedback(item, {
-                      status: "RESCHEDULED",
-                      reason: "Deferred for later",
-                      rescheduledTo: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                    })
-                  }
-                >
-                  Later
-                </Button>
-                <Button className="ghost" onClick={() => void submitFeedback(item, { status: "SKIPPED", reason: "Skipped in field" })}>Skip</Button>
+                <Button onClick={() => openFeedbackComposer(item, "DONE")}>Done</Button>
+                <Button className="ghost" onClick={() => openFeedbackComposer(item, "RESCHEDULED")}>Reschedule</Button>
+                <Button className="ghost" onClick={() => openFeedbackComposer(item, "SKIPPED")}>Skip</Button>
                 <Button
                   className="ghost"
                   onClick={() => setSelectedDestinationId(`doctor:${item.doctorId}`)}
@@ -1169,6 +1209,56 @@ export default function NbaDashboardPage() {
                   Route
                 </Button>
               </div>
+              {feedbackComposer?.recommendationId === item.recommendationId && (
+                <div className="pn-feedback-composer">
+                  <Field label="Status">
+                    <select
+                      value={feedbackComposer.status}
+                      onChange={(event) =>
+                        setFeedbackComposer((current) =>
+                          current
+                            ? {
+                                ...current,
+                                status: event.target.value as FeedbackComposer["status"],
+                              }
+                            : current
+                        )
+                      }
+                    >
+                      <option value="DONE">Done</option>
+                      <option value="SKIPPED">Skipped</option>
+                      <option value="RESCHEDULED">Rescheduled</option>
+                    </select>
+                  </Field>
+                  <Field label="Reason">
+                    <textarea
+                      value={feedbackComposer.reason}
+                      onChange={(event) =>
+                        setFeedbackComposer((current) => (current ? { ...current, reason: event.target.value } : current))
+                      }
+                      placeholder="Why was this action done, skipped, or rescheduled?"
+                      rows={3}
+                    />
+                  </Field>
+                  {feedbackComposer.status === "RESCHEDULED" && (
+                    <Field label="Reschedule To">
+                      <input
+                        type="datetime-local"
+                        value={feedbackComposer.rescheduledTo}
+                        onChange={(event) =>
+                          setFeedbackComposer((current) =>
+                            current ? { ...current, rescheduledTo: event.target.value } : current
+                          )
+                        }
+                      />
+                    </Field>
+                  )}
+                  <div className="row-actions">
+                    <Button onClick={() => void handleSubmitFeedbackComposer(item)}>Submit Feedback</Button>
+                    <Button className="ghost" onClick={() => setFeedbackComposer(null)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         ))}
@@ -1178,8 +1268,37 @@ export default function NbaDashboardPage() {
         <Pill>Queued visits: {queuedVisits}</Pill>
         <Pill>Queued feedback: {queuedFeedback}</Pill>
         <Pill>Conflicts: {conflicts.length}</Pill>
+        <Field label="Sync Strategy">
+          <select value={syncStrategy} onChange={(event) => setSyncStrategy(event.target.value as SyncConflictStrategy)}>
+            <option value="SERVER_WINS">Server wins</option>
+            <option value="CLIENT_WINS">Client wins</option>
+          </select>
+        </Field>
         <Button className="ghost" onClick={syncNow}>Sync Now</Button>
       </div>
+
+      {conflicts.length > 0 && (
+        <Card>
+          <div className="pn-section-head">
+            <h2>Sync Conflicts</h2>
+            <Pill>{conflicts.length}</Pill>
+          </div>
+          <div className="pn-commute-list">
+            {conflicts.map((conflict) => (
+              <div key={`${conflict.type}-${conflict.clientReferenceId}`} className="pn-commute-row">
+                <div>
+                  <strong>{conflict.type}</strong>
+                  <p>{conflict.reason}</p>
+                </div>
+                <div className="pn-destination-meta">
+                  <span>{conflict.clientReferenceId}</span>
+                  <span>{conflict.serverId}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {status && <div className="toast">{status}</div>}
     </div>
