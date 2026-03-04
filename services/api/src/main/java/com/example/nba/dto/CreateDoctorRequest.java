@@ -16,6 +16,10 @@ public record CreateDoctorRequest(
     String notes,
     @Size(max = 32) String whatsappNumber,
     @Email @Size(max = 255) String email,
+    @Size(max = 255) String targetProductFocus,
+    @Size(max = 255) String availabilityPattern,
+    @Size(max = 128) String availabilityWindow,
+    String schedulingNotes,
     Double lat,
     Double lon
 ) {}

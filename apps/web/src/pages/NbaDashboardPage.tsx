@@ -1,17 +1,26 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  capturePharmacyFeedback,
   fetchDoctors,
+  fetchMyAssignedProducts,
+  fetchMySchedulePreference,
   fetchMyTerritories,
   fetchMyVisits,
   fetchNbaNext,
+  fetchPharmacies,
   submitRecommendationFeedback,
   syncBatch,
+  updateMySchedulePreference,
   type Doctor,
   type NbaRecommendation,
+  type Pharmacy,
   type SyncConflict,
   type SyncConflictStrategy,
   type SyncFeedbackRequest,
   type Territory,
+  type UpdateUserSchedulePreferenceRequest,
+  type UserProductAssignment,
+  type UserSchedulePreference,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { getGoogleMapsApiKey, loadGoogleMaps } from "../lib/googleMaps";
@@ -79,6 +88,16 @@ type FeedbackComposer = {
   status: "DONE" | "SKIPPED" | "RESCHEDULED";
   reason: string;
   rescheduledTo: string;
+};
+
+type ScheduleDraft = {
+  workdayStart: string;
+  workdayEnd: string;
+  breakStart: string;
+  breakEnd: string;
+  maxVisitsPerDay: string;
+  baseLocationText: string;
+  planningNotes: string;
 };
 
 const LOCATION_PRIVACY_KEY = "nba_mr_location_privacy";
@@ -150,6 +169,35 @@ function travelModeLabel(mode: TravelMode) {
   }
 }
 
+function normalizeTimeInput(value: string | null | undefined) {
+  if (!value) return "";
+  return value.slice(0, 5);
+}
+
+function scheduleToDraft(schedule: UserSchedulePreference): ScheduleDraft {
+  return {
+    workdayStart: normalizeTimeInput(schedule.workdayStart),
+    workdayEnd: normalizeTimeInput(schedule.workdayEnd),
+    breakStart: normalizeTimeInput(schedule.breakStart),
+    breakEnd: normalizeTimeInput(schedule.breakEnd),
+    maxVisitsPerDay: String(schedule.maxVisitsPerDay ?? 8),
+    baseLocationText: schedule.baseLocationText ?? "",
+    planningNotes: schedule.planningNotes ?? "",
+  };
+}
+
+function buildScheduleRequest(draft: ScheduleDraft): UpdateUserSchedulePreferenceRequest {
+  return {
+    workdayStart: draft.workdayStart,
+    workdayEnd: draft.workdayEnd,
+    breakStart: draft.breakStart || null,
+    breakEnd: draft.breakEnd || null,
+    maxVisitsPerDay: Number(draft.maxVisitsPerDay || 8),
+    baseLocationText: draft.baseLocationText,
+    planningNotes: draft.planningNotes,
+  };
+}
+
 export default function NbaDashboardPage() {
   const { token, username } = useAuth();
   const [territories, setTerritories] = useState<Territory[]>([]);
@@ -160,6 +208,27 @@ export default function NbaDashboardPage() {
   const [visitCount, setVisitCount] = useState(0);
   const [coverageScore, setCoverageScore] = useState(0);
   const [acceptanceRate, setAcceptanceRate] = useState(0);
+  const [assignedProducts, setAssignedProducts] = useState<UserProductAssignment[]>([]);
+  const [pharmacyAccounts, setPharmacyAccounts] = useState<Pharmacy[]>([]);
+  const [pharmacyFeedback, setPharmacyFeedback] = useState({
+    pharmacyId: "",
+    productId: "",
+    doctorId: "",
+    prescribed: "UNKNOWN",
+    stockAvailable: "UNKNOWN",
+    notes: "",
+  });
+  const [schedulePreference, setSchedulePreference] = useState<UserSchedulePreference | null>(null);
+  const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft>({
+    workdayStart: "08:30",
+    workdayEnd: "17:30",
+    breakStart: "",
+    breakEnd: "",
+    maxVisitsPerDay: "8",
+    baseLocationText: "",
+    planningNotes: "",
+  });
+  const [savingSchedule, setSavingSchedule] = useState(false);
   const [syncStrategy, setSyncStrategy] = useState<SyncConflictStrategy>("SERVER_WINS");
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [status, setStatus] = useState("");
@@ -203,14 +272,21 @@ export default function NbaDashboardPage() {
     try {
       const myTerritories = await fetchMyTerritories(authToken);
       const territoryId = myTerritories[0]?.id;
-      const [doctorPage, visitsPage] = await Promise.all([
+      const [doctorPage, visitsPage, schedule, products, pharmacyPage] = await Promise.all([
         fetchDoctors(authToken, { territoryId, size: 200 }),
         fetchMyVisits(authToken, 0, 100),
+        fetchMySchedulePreference(authToken),
+        fetchMyAssignedProducts(authToken),
+        fetchPharmacies(authToken, { territoryId, size: 100 }),
       ]);
       setTerritories(myTerritories);
       setDoctors(doctorPage.content);
       setDoctorCount(doctorPage.meta.totalElements);
       setVisitCount(visitsPage.meta.totalElements);
+      setAssignedProducts(products);
+      setPharmacyAccounts(pharmacyPage.content);
+      setSchedulePreference(schedule);
+      setScheduleDraft(scheduleToDraft(schedule));
       setCoverageScore(Math.min(100, Math.round((visitsPage.meta.totalElements / Math.max(1, doctorPage.meta.totalElements)) * 100)));
     } catch {
       setStatus("Failed to load dashboard summary");
@@ -265,17 +341,43 @@ export default function NbaDashboardPage() {
       })
       .filter((item): item is MapDestination => Boolean(item));
 
-    const pharmacyDestinations = pharmacies.map((pharmacy) => ({
+    const discoveredPharmacyDestinations = pharmacies.map((pharmacy) => ({
       ...pharmacy,
       distanceKm: currentPosition ? haversineKm(currentPosition, pharmacy.location) : null,
     }));
 
-    return [...doctorDestinations, ...pharmacyDestinations].sort((left, right) => {
+    const assignedPharmacyDestinations = pharmacyAccounts
+      .map((pharmacy) => {
+        if (typeof pharmacy.lat !== "number" || typeof pharmacy.lon !== "number") {
+          return null;
+        }
+        const location = { lat: pharmacy.lat, lng: pharmacy.lon };
+        return {
+          id: `pharmacy-account:${pharmacy.id}`,
+          kind: "pharmacy" as const,
+          name: pharmacy.name,
+          address: pharmacy.address || pharmacy.notes || "Assigned pharmacy",
+          location,
+          placeId: pharmacy.googlePlaceId ?? undefined,
+          distanceKm: currentPosition ? haversineKm(currentPosition, location) : null,
+        };
+      })
+      .filter((item): item is MapDestination => Boolean(item));
+
+    const merged = [...doctorDestinations, ...assignedPharmacyDestinations, ...discoveredPharmacyDestinations];
+    const uniqueById = new Map<string, MapDestination>();
+    merged.forEach((destination) => {
+      if (!uniqueById.has(destination.id)) {
+        uniqueById.set(destination.id, destination);
+      }
+    });
+
+    return [...uniqueById.values()].sort((left, right) => {
       const leftDistance = left.distanceKm ?? Number.POSITIVE_INFINITY;
       const rightDistance = right.distanceKm ?? Number.POSITIVE_INFINITY;
       return leftDistance - rightDistance;
     });
-  }, [currentPosition, doctors, pharmacies]);
+  }, [currentPosition, doctors, pharmacies, pharmacyAccounts]);
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
@@ -283,6 +385,83 @@ export default function NbaDashboardPage() {
   );
 
   const activeTerritory = territories[0] ?? null;
+
+  const dayPlanStatus = useMemo(() => {
+    const start = scheduleDraft.workdayStart || "08:30";
+    const end = scheduleDraft.workdayEnd || "17:30";
+    const breakStart = scheduleDraft.breakStart;
+    const breakEnd = scheduleDraft.breakEnd;
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const toMinutes = (value: string) => {
+      const [hours, minutes] = value.split(":").map(Number);
+      return hours * 60 + minutes;
+    };
+
+    if (!scheduleDraft.workdayStart || !scheduleDraft.workdayEnd) {
+      return "Set your workday window to help schedule-aware recommendations";
+    }
+
+    if (currentMinutes < toMinutes(start) || currentMinutes > toMinutes(end)) {
+      return `Current time is outside your workday window (${start}-${end})`;
+    }
+    if (breakStart && breakEnd && currentMinutes >= toMinutes(breakStart) && currentMinutes <= toMinutes(breakEnd)) {
+      return `Current time overlaps your break window (${breakStart}-${breakEnd})`;
+    }
+
+    const maxVisits = Number(scheduleDraft.maxVisitsPerDay || 0);
+    if (maxVisits > 0 && visitCount >= maxVisits) {
+      return `You have reached your day-plan capacity (${visitCount}/${maxVisits})`;
+    }
+    if (maxVisits > 0) {
+      return `${Math.max(0, maxVisits - visitCount)} visit slots remain in your day plan`;
+    }
+    return "Your day plan is active";
+  }, [scheduleDraft, visitCount]);
+
+  const topRecommendationScheduleDrivers = useMemo(() => {
+    const first = recommendations[0];
+    if (!first) return [];
+    return first.drivers.filter((driver) =>
+      ["time_of_day_fit", "mr_capacity_today", "days_since_last_visit"].includes(driver.key)
+    );
+  }, [recommendations]);
+
+  const recommendedDestinationIdByRecommendation = useMemo(() => {
+    const pharmacyById = new Set(pharmacyAccounts.map((pharmacy) => pharmacy.id));
+    const destinationByPlaceId = new Map<string, string>();
+    destinations.forEach((destination) => {
+      if (destination.kind === "pharmacy" && destination.placeId) {
+        destinationByPlaceId.set(destination.placeId, destination.id);
+      }
+    });
+
+    const mapping = new Map<string, string | null>();
+    recommendations.forEach((recommendation) => {
+      const recommendedPharmacyId = recommendation.recommendedPharmacyId;
+      if (recommendedPharmacyId) {
+        if (pharmacyById.has(recommendedPharmacyId)) {
+          const destinationId = `pharmacy-account:${recommendedPharmacyId}`;
+          if (destinations.some((destination) => destination.id === destinationId)) {
+            mapping.set(recommendation.recommendationId, destinationId);
+            return;
+          }
+        }
+        const byPlace = destinationByPlaceId.get(recommendedPharmacyId);
+        if (byPlace) {
+          mapping.set(recommendation.recommendationId, byPlace);
+          return;
+        }
+      }
+
+      const doctorDestinationId = `doctor:${recommendation.doctorId}`;
+      mapping.set(
+        recommendation.recommendationId,
+        destinations.some((destination) => destination.id === doctorDestinationId) ? doctorDestinationId : null
+      );
+    });
+    return mapping;
+  }, [destinations, pharmacyAccounts, recommendations]);
 
   const regionCenter = useMemo(() => {
     const territoryDoctors = activeTerritory
@@ -874,6 +1053,58 @@ export default function NbaDashboardPage() {
     }
   };
 
+  const saveSchedulePreference = async () => {
+    if (!token) return;
+    if (!scheduleDraft.workdayStart || !scheduleDraft.workdayEnd) {
+      setStatus("Workday start and end are required");
+      return;
+    }
+
+    setSavingSchedule(true);
+    try {
+      const updated = await updateMySchedulePreference(token, buildScheduleRequest(scheduleDraft));
+      setSchedulePreference(updated);
+      setScheduleDraft(scheduleToDraft(updated));
+      setStatus("Day plan saved");
+    } catch {
+      setStatus("Failed to save day plan");
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
+  const submitPharmacyFeedbackLoop = async () => {
+    if (!token) return;
+    if (!pharmacyFeedback.pharmacyId || !pharmacyFeedback.productId) {
+      setStatus("Select a pharmacy and product for pharmacy feedback");
+      return;
+    }
+    try {
+      await capturePharmacyFeedback(token, {
+        pharmacyId: pharmacyFeedback.pharmacyId,
+        productId: pharmacyFeedback.productId,
+        doctorId: pharmacyFeedback.doctorId || undefined,
+        capturedAt: new Date().toISOString(),
+        prescribed:
+          pharmacyFeedback.prescribed === "UNKNOWN" ? undefined : pharmacyFeedback.prescribed === "YES",
+        stockAvailable:
+          pharmacyFeedback.stockAvailable === "UNKNOWN" ? undefined : pharmacyFeedback.stockAvailable === "YES",
+        notes: pharmacyFeedback.notes,
+      });
+      setPharmacyFeedback({
+        pharmacyId: "",
+        productId: "",
+        doctorId: "",
+        prescribed: "UNKNOWN",
+        stockAvailable: "UNKNOWN",
+        notes: "",
+      });
+      setStatus("Pharmacy feedback captured for MR follow-up");
+    } catch {
+      setStatus("Failed to capture pharmacy feedback");
+    }
+  };
+
   const handleLocationSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const maps = mapsRef.current;
@@ -1162,6 +1393,206 @@ export default function NbaDashboardPage() {
         </Card>
       </div>
 
+      <div className="pn-plan-layout">
+        <Card>
+          <div className="pn-section-head">
+            <h2>Day Plan</h2>
+            <Pill>{schedulePreference?.updatedAt ? `Updated ${new Date(schedulePreference.updatedAt).toLocaleTimeString()}` : "Default plan"}</Pill>
+          </div>
+          <div className="pn-plan-grid">
+            <Field label="Workday Start">
+              <input
+                type="time"
+                value={scheduleDraft.workdayStart}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, workdayStart: event.target.value }))}
+              />
+            </Field>
+            <Field label="Workday End">
+              <input
+                type="time"
+                value={scheduleDraft.workdayEnd}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, workdayEnd: event.target.value }))}
+              />
+            </Field>
+            <Field label="Break Start">
+              <input
+                type="time"
+                value={scheduleDraft.breakStart}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, breakStart: event.target.value }))}
+              />
+            </Field>
+            <Field label="Break End">
+              <input
+                type="time"
+                value={scheduleDraft.breakEnd}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, breakEnd: event.target.value }))}
+              />
+            </Field>
+            <Field label="Max Visits / Day">
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={scheduleDraft.maxVisitsPerDay}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, maxVisitsPerDay: event.target.value }))}
+              />
+            </Field>
+            <Field label="Base Location">
+              <input
+                value={scheduleDraft.baseLocationText}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, baseLocationText: event.target.value }))}
+                placeholder="Home base, branch, or city"
+              />
+            </Field>
+            <Field label="Planning Notes">
+              <textarea
+                value={scheduleDraft.planningNotes}
+                onChange={(event) => setScheduleDraft((current) => ({ ...current, planningNotes: event.target.value }))}
+                rows={3}
+                placeholder="Constraints, meetings, product push, hospital timing"
+              />
+            </Field>
+          </div>
+          <div className="pn-plan-summary">
+            <div>
+              <strong>Current Fit</strong>
+              <p className="muted">{dayPlanStatus}</p>
+            </div>
+            <div className="chips">
+              <Pill>{visitCount} visits logged</Pill>
+              <Pill>{scheduleDraft.maxVisitsPerDay || "8"} planned max</Pill>
+              {scheduleDraft.baseLocationText && <Pill>{scheduleDraft.baseLocationText}</Pill>}
+            </div>
+          </div>
+          <div className="row-actions">
+            <Button onClick={() => void saveSchedulePreference()} disabled={savingSchedule}>
+              {savingSchedule ? "Saving..." : "Save Day Plan"}
+            </Button>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="pn-section-head">
+            <h2>Schedule-Aware NBA Hints</h2>
+            <Pill>{recommendations[0] ? recommendations[0].doctorName : "No active recommendation"}</Pill>
+          </div>
+          <div className="pn-driver-list">
+            {topRecommendationScheduleDrivers.map((driver) => (
+              <div key={driver.key} className="pn-driver-row">
+                <strong>{driver.key}</strong>
+                <span>{driver.value}</span>
+                <Pill>{driver.contribution.toFixed(1)}</Pill>
+              </div>
+            ))}
+            {topRecommendationScheduleDrivers.length === 0 && (
+              <p className="muted">Load recommendations to see time-of-day and capacity reasoning for the top-ranked doctor.</p>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="pn-plan-layout">
+        <Card>
+          <div className="pn-section-head">
+            <h2>Pharmacy Feedback Loop</h2>
+            <Pill>MR to pharmacy to doctor loop</Pill>
+          </div>
+          <p className="muted">
+            When a product is not moving in pharmacies, record whether the linked doctor is prescribing it and whether stock is available before your next doctor visit.
+          </p>
+          <div className="pn-plan-grid">
+            <Field label="Pharmacy">
+              <select
+                value={pharmacyFeedback.pharmacyId}
+                onChange={(event) => setPharmacyFeedback((current) => ({ ...current, pharmacyId: event.target.value }))}
+              >
+                <option value="">Select pharmacy</option>
+                {pharmacyAccounts.map((pharmacy) => (
+                  <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Assigned Product">
+              <select
+                value={pharmacyFeedback.productId}
+                onChange={(event) => setPharmacyFeedback((current) => ({ ...current, productId: event.target.value }))}
+              >
+                <option value="">Select product</option>
+                {assignedProducts.map((product) => (
+                  <option key={product.productId} value={product.productId}>
+                    {product.brandName || product.productName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Doctor">
+              <select
+                value={pharmacyFeedback.doctorId}
+                onChange={(event) => setPharmacyFeedback((current) => ({ ...current, doctorId: event.target.value }))}
+              >
+                <option value="">No linked doctor</option>
+                {doctors.map((doctor) => (
+                  <option key={doctor.id} value={doctor.id}>{doctor.fullName}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Doctor Prescribing?">
+              <select
+                value={pharmacyFeedback.prescribed}
+                onChange={(event) => setPharmacyFeedback((current) => ({ ...current, prescribed: event.target.value }))}
+              >
+                <option value="UNKNOWN">Unknown</option>
+                <option value="YES">Yes</option>
+                <option value="NO">No</option>
+              </select>
+            </Field>
+            <Field label="Stock Available?">
+              <select
+                value={pharmacyFeedback.stockAvailable}
+                onChange={(event) => setPharmacyFeedback((current) => ({ ...current, stockAvailable: event.target.value }))}
+              >
+                <option value="UNKNOWN">Unknown</option>
+                <option value="YES">Yes</option>
+                <option value="NO">No</option>
+              </select>
+            </Field>
+            <Field label="Field Notes">
+              <textarea
+                rows={3}
+                value={pharmacyFeedback.notes}
+                onChange={(event) => setPharmacyFeedback((current) => ({ ...current, notes: event.target.value }))}
+                placeholder="Prescribing blockers, competitor movement, stock issues, pharmacist remarks"
+              />
+            </Field>
+          </div>
+          <div className="row-actions">
+            <Button onClick={() => void submitPharmacyFeedbackLoop()}>Capture Pharmacy Insight</Button>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="pn-section-head">
+            <h2>Assigned Portfolio</h2>
+            <Pill>{assignedProducts.length} products</Pill>
+          </div>
+          <div className="table-list">
+            {assignedProducts.map((product) => (
+              <div key={product.productId} className="table-row">
+                <div>
+                  <strong>{product.brandName || product.productName}</strong>
+                  <p className="muted">{product.productName} | {product.productCode}</p>
+                </div>
+                <div className="chips">
+                  <Pill>{product.manufacturerType || "General"}</Pill>
+                  <Pill>{product.active ? "Active" : "Inactive"}</Pill>
+                </div>
+              </div>
+            ))}
+            {assignedProducts.length === 0 && <p className="muted">No product assignments found for this MR.</p>}
+          </div>
+        </Card>
+      </div>
+
       <div className="pn-section-head">
         <h2>Next Best Actions</h2>
         <Pill>Ranked by AI scoring</Pill>
@@ -1175,7 +1606,16 @@ export default function NbaDashboardPage() {
               <div>
                 <h3>{item.doctorName}</h3>
                 <p className="pn-sub">{item.specialty || "General"} <Pill>{item.tier || "Standard"}</Pill></p>
+                {item.recommendedAction && (
+                  <p className="pn-sub">
+                    <Pill>{item.recommendedAction}</Pill>
+                  </p>
+                )}
+                {item.recommendedPharmacyName && (
+                  <p className="muted">Pharmacy target: {item.recommendedPharmacyName}</p>
+                )}
                 <p className="pn-reason">{item.explanation}</p>
+                {item.recommendedMessage && <p className="muted">{item.recommendedMessage}</p>}
                 <div className="chips">
                   {item.drivers.slice(0, 3).map((driver) => (
                     <Pill key={`${item.recommendationId}-${driver.key}`}>{driver.key}</Pill>
@@ -1203,8 +1643,13 @@ export default function NbaDashboardPage() {
                 <Button className="ghost" onClick={() => openFeedbackComposer(item, "SKIPPED")}>Skip</Button>
                 <Button
                   className="ghost"
-                  onClick={() => setSelectedDestinationId(`doctor:${item.doctorId}`)}
-                  disabled={!doctors.some((doctor) => doctor.id === item.doctorId && doctorLocation(doctor))}
+                  onClick={() => {
+                    const targetId = recommendedDestinationIdByRecommendation.get(item.recommendationId);
+                    if (targetId) {
+                      setSelectedDestinationId(targetId);
+                    }
+                  }}
+                  disabled={!recommendedDestinationIdByRecommendation.get(item.recommendationId)}
                 >
                   Route
                 </Button>

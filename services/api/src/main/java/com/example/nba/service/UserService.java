@@ -3,12 +3,15 @@ package com.example.nba.service;
 import com.example.nba.dto.AssignTerritoryRequest;
 import com.example.nba.dto.CreateUserRequest;
 import com.example.nba.dto.TerritoryResponse;
+import com.example.nba.dto.UpdateUserSchedulePreferenceRequest;
 import com.example.nba.dto.UpdateUserRequest;
+import com.example.nba.dto.UserSchedulePreferenceResponse;
 import com.example.nba.dto.UserProfileResponse;
 import com.example.nba.entity.Role;
 import com.example.nba.dto.UserSummaryResponse;
 import com.example.nba.entity.TerritoryAssignment;
 import com.example.nba.entity.User;
+import com.example.nba.entity.UserSchedulePreference;
 import com.example.nba.entity.UserRole;
 import com.example.nba.entity.UserRoleId;
 import com.example.nba.repository.RoleRepository;
@@ -16,6 +19,8 @@ import com.example.nba.repository.TerritoryAssignmentRepository;
 import com.example.nba.repository.TerritoryRepository;
 import com.example.nba.repository.UserRoleRepository;
 import com.example.nba.repository.UserRepository;
+import com.example.nba.repository.UserSchedulePreferenceRepository;
+import java.time.LocalTime;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -33,12 +38,14 @@ import org.springframework.http.HttpStatus;
 public class UserService {
   private static final String ROLE_MR = "MR";
   private static final String ROLE_MANAGER = "MANAGER";
+  private static final String ROLE_SALES_REP = "SALES_REP";
 
   private final UserRepository userRepository;
   private final RoleRepository roleRepository;
   private final UserRoleRepository userRoleRepository;
   private final TerritoryAssignmentRepository territoryAssignmentRepository;
   private final TerritoryRepository territoryRepository;
+  private final UserSchedulePreferenceRepository userSchedulePreferenceRepository;
   private final TerritoryService territoryService;
 
   public UserService(UserRepository userRepository,
@@ -46,12 +53,14 @@ public class UserService {
                      UserRoleRepository userRoleRepository,
                      TerritoryAssignmentRepository territoryAssignmentRepository,
                      TerritoryRepository territoryRepository,
+                     UserSchedulePreferenceRepository userSchedulePreferenceRepository,
                      TerritoryService territoryService) {
     this.userRepository = userRepository;
     this.roleRepository = roleRepository;
     this.userRoleRepository = userRoleRepository;
     this.territoryAssignmentRepository = territoryAssignmentRepository;
     this.territoryRepository = territoryRepository;
+    this.userSchedulePreferenceRepository = userSchedulePreferenceRepository;
     this.territoryService = territoryService;
   }
 
@@ -229,6 +238,10 @@ public class UserService {
     return listUsersByRole(ROLE_MANAGER);
   }
 
+  public List<UserProfileResponse> listSalesRepProfiles() {
+    return listUsersByRole(ROLE_SALES_REP);
+  }
+
   public UserProfileResponse createMr(CreateUserRequest request) {
     return createUser(request, ROLE_MR);
   }
@@ -237,8 +250,119 @@ public class UserService {
     return createUser(request, ROLE_MANAGER);
   }
 
+  public UserProfileResponse createSalesRep(CreateUserRequest request) {
+    return createUser(request, ROLE_SALES_REP);
+  }
+
+  public UserSchedulePreferenceResponse getSchedulePreference(UUID userId) {
+    ensureUserExists(userId);
+    return toScheduleResponse(userSchedulePreferenceRepository.findById(userId).orElseGet(() -> defaultSchedule(userId)));
+  }
+
+  @Transactional
+  public UserSchedulePreferenceResponse updateSchedulePreference(UUID userId, UpdateUserSchedulePreferenceRequest request) {
+    ensureUserExists(userId);
+
+    LocalTime workdayStart = parseTime(request.workdayStart(), "workdayStart");
+    LocalTime workdayEnd = parseTime(request.workdayEnd(), "workdayEnd");
+    LocalTime breakStart = parseOptionalTime(request.breakStart(), "breakStart");
+    LocalTime breakEnd = parseOptionalTime(request.breakEnd(), "breakEnd");
+
+    if (!workdayEnd.isAfter(workdayStart)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Workday end must be after workday start");
+    }
+    if ((breakStart == null) != (breakEnd == null)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Break start and break end must both be provided");
+    }
+    if (breakStart != null) {
+      if (!breakEnd.isAfter(breakStart)) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Break end must be after break start");
+      }
+      if (breakStart.isBefore(workdayStart) || breakEnd.isAfter(workdayEnd)) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Break must be inside the workday window");
+      }
+    }
+
+    OffsetDateTime now = OffsetDateTime.now();
+    UserSchedulePreference entity = userSchedulePreferenceRepository.findById(userId).orElseGet(() -> {
+      UserSchedulePreference created = new UserSchedulePreference();
+      created.setUserId(userId);
+      created.setCreatedAt(now);
+      return created;
+    });
+
+    entity.setWorkdayStart(workdayStart);
+    entity.setWorkdayEnd(workdayEnd);
+    entity.setBreakStart(breakStart);
+    entity.setBreakEnd(breakEnd);
+    entity.setMaxVisitsPerDay(request.maxVisitsPerDay() != null ? request.maxVisitsPerDay() : 8);
+    entity.setBaseLocationText(trimToNull(request.baseLocationText()));
+    entity.setPlanningNotes(trimToNull(request.planningNotes()));
+    entity.setUpdatedAt(now);
+
+    return toScheduleResponse(userSchedulePreferenceRepository.save(entity));
+  }
+
   private UserProfileResponse toUserProfile(UUID id, String fullName, String email, boolean active, String role) {
     List<TerritoryResponse> territories = listTerritoriesForUser(id);
     return new UserProfileResponse(id, fullName, email, active, role, territories);
+  }
+
+  private void ensureUserExists(UUID userId) {
+    if (!userRepository.existsById(userId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+    }
+  }
+
+  private UserSchedulePreference defaultSchedule(UUID userId) {
+    UserSchedulePreference fallback = new UserSchedulePreference();
+    fallback.setUserId(userId);
+    fallback.setWorkdayStart(LocalTime.of(8, 30));
+    fallback.setWorkdayEnd(LocalTime.of(17, 30));
+    fallback.setMaxVisitsPerDay(8);
+    fallback.setUpdatedAt(OffsetDateTime.now());
+    fallback.setCreatedAt(fallback.getUpdatedAt());
+    return fallback;
+  }
+
+  private UserSchedulePreferenceResponse toScheduleResponse(UserSchedulePreference entity) {
+    return new UserSchedulePreferenceResponse(
+        entity.getUserId(),
+        formatTime(entity.getWorkdayStart()),
+        formatTime(entity.getWorkdayEnd()),
+        formatTime(entity.getBreakStart()),
+        formatTime(entity.getBreakEnd()),
+        entity.getMaxVisitsPerDay(),
+        entity.getBaseLocationText(),
+        entity.getPlanningNotes(),
+        entity.getUpdatedAt()
+    );
+  }
+
+  private LocalTime parseTime(String value, String fieldName) {
+    try {
+      return LocalTime.parse(value.trim());
+    } catch (Exception ex) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid time for " + fieldName);
+    }
+  }
+
+  private LocalTime parseOptionalTime(String value, String fieldName) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    return parseTime(value, fieldName);
+  }
+
+  private String formatTime(LocalTime value) {
+    return value != null ? value.toString() : null;
+  }
+
+  private String trimToNull(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
   }
 }

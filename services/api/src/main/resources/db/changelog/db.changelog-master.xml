@@ -32,4 +32,40 @@
     <changeSet id="007-doctor-location-backfill" author="codex">
         <sqlFile path="db/changelog/007_doctor_location_backfill.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="008-doctor-context-fields" author="codex">
+        <sqlFile path="db/changelog/008_doctor_context_fields.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="009-user-schedule-preferences" author="codex">
+        <sqlFile path="db/changelog/009_user_schedule_preferences.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="010-recommendation-actions" author="codex">
+        <sqlFile path="db/changelog/010_recommendation_actions.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="011-field-sales-domain" author="codex">
+        <sqlFile path="db/changelog/011_field_sales_domain.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="012-sales-rep-weekly-targets" author="codex">
+        <sqlFile path="db/changelog/012_sales_rep_weekly_targets.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="013-google-place-pharmacies" author="codex">
+        <sqlFile path="db/changelog/013_google_place_pharmacies.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="014-sales-trend-demo-data" author="codex">
+        <sqlFile path="db/changelog/014_sales_trend_demo_data.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="015-demo-additional-sales-data" author="codex">
+        <sqlFile path="db/changelog/015_demo_additional_sales_data.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
+
+    <changeSet id="016-recommendation-pharmacy-target" author="codex">
+        <sqlFile path="db/changelog/016_recommendation_pharmacy_target.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

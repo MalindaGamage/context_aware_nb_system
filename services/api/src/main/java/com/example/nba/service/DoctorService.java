@@ -166,6 +166,10 @@ public class DoctorService {
         request.notes(),
         request.whatsappNumber(),
         request.email(),
+        request.targetProductFocus(),
+        request.availabilityPattern(),
+        request.availabilityWindow(),
+        request.schedulingNotes(),
         request.lat(),
         request.lon()
     );
@@ -199,6 +203,10 @@ public class DoctorService {
         request.notes(),
         request.whatsappNumber(),
         request.email(),
+        request.targetProductFocus(),
+        request.availabilityPattern(),
+        request.availabilityWindow(),
+        request.schedulingNotes(),
         request.lat(),
         request.lon()
     );
@@ -232,6 +240,10 @@ public class DoctorService {
         doctor.getNotes(),
         doctor.getWhatsappNumber(),
         doctor.getEmail(),
+        doctor.getTargetProductFocus(),
+        doctor.getAvailabilityPattern(),
+        doctor.getAvailabilityWindow(),
+        doctor.getSchedulingNotes(),
         doctor.getLocation() == null ? null : doctor.getLocation().getY(),
         doctor.getLocation() == null ? null : doctor.getLocation().getX()
     );
@@ -274,6 +286,10 @@ public class DoctorService {
       String notes,
       String whatsappNumber,
       String email,
+      String targetProductFocus,
+      String availabilityPattern,
+      String availabilityWindow,
+      String schedulingNotes,
       Double lat,
       Double lon
   ) {
@@ -285,6 +301,10 @@ public class DoctorService {
     doctor.setNotes(trimToNull(notes));
     doctor.setWhatsappNumber(trimToNull(whatsappNumber));
     doctor.setEmail(trimToNull(email));
+    doctor.setTargetProductFocus(trimToNull(targetProductFocus));
+    doctor.setAvailabilityPattern(trimToNull(availabilityPattern));
+    doctor.setAvailabilityWindow(trimToNull(availabilityWindow));
+    doctor.setSchedulingNotes(trimToNull(schedulingNotes));
     Point location = lat == null ? null : GEOMETRY_FACTORY.createPoint(new Coordinate(lon, lat));
     doctor.setLocation(location);
   }

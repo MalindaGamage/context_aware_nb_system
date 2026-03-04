@@ -30,6 +30,18 @@ public class Recommendation {
   @Column(nullable = false)
   private String explanation;
 
+  @Column(name = "recommended_action")
+  private String recommendedAction;
+
+  @Column(name = "recommended_message")
+  private String recommendedMessage;
+
+  @Column(name = "recommended_pharmacy_id", columnDefinition = "uuid")
+  private UUID recommendedPharmacyId;
+
+  @Column(name = "recommended_pharmacy_name")
+  private String recommendedPharmacyName;
+
   @Column(name = "created_at", nullable = false)
   private OffsetDateTime createdAt;
 
@@ -50,6 +62,18 @@ public class Recommendation {
 
   public String getExplanation() { return explanation; }
   public void setExplanation(String explanation) { this.explanation = explanation; }
+
+  public String getRecommendedAction() { return recommendedAction; }
+  public void setRecommendedAction(String recommendedAction) { this.recommendedAction = recommendedAction; }
+
+  public String getRecommendedMessage() { return recommendedMessage; }
+  public void setRecommendedMessage(String recommendedMessage) { this.recommendedMessage = recommendedMessage; }
+
+  public UUID getRecommendedPharmacyId() { return recommendedPharmacyId; }
+  public void setRecommendedPharmacyId(UUID recommendedPharmacyId) { this.recommendedPharmacyId = recommendedPharmacyId; }
+
+  public String getRecommendedPharmacyName() { return recommendedPharmacyName; }
+  public void setRecommendedPharmacyName(String recommendedPharmacyName) { this.recommendedPharmacyName = recommendedPharmacyName; }
 
   public OffsetDateTime getCreatedAt() { return createdAt; }
   public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }

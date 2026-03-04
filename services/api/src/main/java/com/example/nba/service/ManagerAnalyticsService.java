@@ -3,9 +3,14 @@ package com.example.nba.service;
 import com.example.nba.dto.ComplianceAnalyticsResponse;
 import com.example.nba.dto.CoverageTierAnalyticsResponse;
 import com.example.nba.dto.ManagerAnalyticsResponse;
+import com.example.nba.dto.ManagerCoachingSummaryResponse;
 import com.example.nba.dto.MissedHighPriorityResponse;
+import com.example.nba.dto.MrCoachingRowResponse;
 import com.example.nba.dto.MrComplianceRowResponse;
+import com.example.nba.dto.SalesRepTargetProgressResponse;
+import com.example.nba.dto.SalesTargetSummaryResponse;
 import com.example.nba.dto.TerritoryOverviewResponse;
+import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.sql.Types;
@@ -28,26 +33,48 @@ public class ManagerAnalyticsService {
     this.jdbc = jdbc;
   }
 
-  public ManagerAnalyticsResponse getDashboard(UUID mrId, UUID territoryId, LocalDate from, LocalDate to) {
+  public ManagerAnalyticsResponse getDashboard(
+      UUID mrId,
+      UUID territoryId,
+      LocalDate from,
+      LocalDate to,
+      LocalDate weekStart
+  ) {
     if (from != null && to != null && from.isAfter(to)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from must be before or equal to to");
     }
 
     Timestamp fromTs = from == null ? null : Timestamp.from(from.atStartOfDay().toInstant(ZoneOffset.UTC));
     Timestamp toTs = to == null ? null : Timestamp.from(to.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC));
+    LocalDate effectiveWeekStart = (weekStart != null ? weekStart : (from != null ? from : LocalDate.now()))
+        .with(java.time.DayOfWeek.MONDAY);
 
     MapSqlParameterSource params = new MapSqlParameterSource()
         .addValue("mrId", mrId, Types.OTHER)
         .addValue("territoryId", territoryId, Types.OTHER)
         .addValue("fromTs", fromTs, Types.TIMESTAMP)
-        .addValue("toTs", toTs, Types.TIMESTAMP);
+        .addValue("toTs", toTs, Types.TIMESTAMP)
+        .addValue("weekStart", java.sql.Date.valueOf(effectiveWeekStart), Types.DATE);
 
     List<CoverageTierAnalyticsResponse> coverage = queryCoverageByTier(params);
     List<MissedHighPriorityResponse> missed = queryMissedHighPriority(params);
     ComplianceAnalyticsResponse compliance = queryCompliance(params);
     List<MrComplianceRowResponse> byMr = queryComplianceByMr(params);
+    ManagerCoachingSummaryResponse coachingSummary = queryCoachingSummary(params);
+    List<MrCoachingRowResponse> coachingByMr = queryCoachingByMr(params);
+    SalesTargetSummaryResponse salesTargetSummary = querySalesTargetSummary(params);
+    List<SalesRepTargetProgressResponse> salesTargetProgress = querySalesTargetProgress(params);
 
-    return new ManagerAnalyticsResponse(coverage, missed, compliance, byMr);
+    return new ManagerAnalyticsResponse(
+        coverage,
+        missed,
+        compliance,
+        byMr,
+        coachingSummary,
+        coachingByMr,
+        salesTargetSummary,
+        salesTargetProgress
+    );
   }
 
   public List<TerritoryOverviewResponse> territoryOverview(LocalDate from, LocalDate to) {
@@ -282,6 +309,327 @@ public class ManagerAnalyticsService {
         rs.getDouble("done_rate"),
         rs.getDouble("override_rate"),
         rs.getDouble("skipped_rate")
+    ));
+  }
+
+  private ManagerCoachingSummaryResponse queryCoachingSummary(MapSqlParameterSource params) {
+    String sql = """
+        WITH mr_scope AS (
+          SELECT DISTINCT u.id, u.full_name
+          FROM users u
+          JOIN user_roles ur ON ur.user_id = u.id
+          JOIN roles r ON r.id = ur.role_id
+          WHERE r.name = 'MR'
+            AND (CAST(:mrId AS UUID) IS NULL OR u.id = CAST(:mrId AS UUID))
+            AND (
+              CAST(:territoryId AS UUID) IS NULL OR EXISTS (
+                SELECT 1
+                FROM territory_assignments ta
+                WHERE ta.user_id = u.id
+                  AND ta.territory_id = CAST(:territoryId AS UUID)
+                  AND ta.starts_on <= CURRENT_DATE
+                  AND (ta.ends_on IS NULL OR ta.ends_on >= CURRENT_DATE)
+              )
+            )
+        ),
+        visit_scope AS (
+          SELECT v.user_id,
+                 COUNT(*) AS total_visits,
+                 COUNT(*) FILTER (
+                   WHERE usp.user_id IS NOT NULL
+                     AND (
+                       (usp.workday_start IS NOT NULL AND usp.workday_end IS NOT NULL
+                        AND CAST(v.visit_time AT TIME ZONE 'UTC' AS time) BETWEEN usp.workday_start AND usp.workday_end)
+                       AND NOT (
+                         usp.break_start IS NOT NULL
+                         AND usp.break_end IS NOT NULL
+                         AND CAST(v.visit_time AT TIME ZONE 'UTC' AS time) BETWEEN usp.break_start AND usp.break_end
+                       )
+                     )
+                 ) AS workday_visits,
+                 COUNT(DISTINCT DATE(v.visit_time AT TIME ZONE 'UTC')) AS active_days,
+                 AVG(day_counts.daily_visits::numeric) AS avg_daily_visits
+          FROM visits v
+          JOIN mr_scope ms ON ms.id = v.user_id
+          LEFT JOIN user_schedule_preferences usp ON usp.user_id = v.user_id
+          JOIN (
+            SELECT v2.user_id, DATE(v2.visit_time AT TIME ZONE 'UTC') AS visit_day, COUNT(*) AS daily_visits
+            FROM visits v2
+            WHERE (CAST(:fromTs AS TIMESTAMP) IS NULL OR v2.visit_time >= CAST(:fromTs AS TIMESTAMP))
+              AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v2.visit_time < CAST(:toTs AS TIMESTAMP))
+            GROUP BY v2.user_id, DATE(v2.visit_time AT TIME ZONE 'UTC')
+          ) day_counts ON day_counts.user_id = v.user_id
+          AND day_counts.visit_day = DATE(v.visit_time AT TIME ZONE 'UTC')
+          WHERE (CAST(:fromTs AS TIMESTAMP) IS NULL OR v.visit_time >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v.visit_time < CAST(:toTs AS TIMESTAMP))
+          GROUP BY v.user_id
+        ),
+        overdue_reschedules AS (
+          SELECT rf.created_by_user_id AS user_id, COUNT(*) AS overdue_count
+          FROM recommendation_feedback rf
+          JOIN recommendations r ON r.id = rf.recommendation_id
+          JOIN doctors d ON d.id = r.doctor_id
+          WHERE rf.status = 'RESCHEDULED'
+            AND rf.rescheduled_to IS NOT NULL
+            AND rf.rescheduled_to < CURRENT_TIMESTAMP
+            AND (CAST(:mrId AS UUID) IS NULL OR rf.created_by_user_id = CAST(:mrId AS UUID))
+            AND (CAST(:territoryId AS UUID) IS NULL OR d.territory_id = CAST(:territoryId AS UUID))
+            AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR rf.created_at >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR rf.created_at < CAST(:toTs AS TIMESTAMP))
+          GROUP BY rf.created_by_user_id
+        )
+        SELECT COUNT(*) AS total_mr_count,
+               COUNT(*) FILTER (WHERE usp.user_id IS NOT NULL) AS configured_schedule_count,
+               ROUND((COUNT(*) FILTER (WHERE usp.user_id IS NOT NULL)::numeric / NULLIF(COUNT(*), 0)) * 100.0, 2) AS schedule_coverage_rate,
+               ROUND((SUM(COALESCE(vs.workday_visits, 0))::numeric / NULLIF(SUM(COALESCE(vs.total_visits, 0)), 0)) * 100.0, 2) AS workday_visit_rate,
+               ROUND(AVG(
+                 CASE
+                   WHEN usp.user_id IS NULL OR usp.max_visits_per_day IS NULL OR usp.max_visits_per_day = 0 OR COALESCE(vs.active_days, 0) = 0
+                     THEN NULL
+                   ELSE LEAST(100.0, (COALESCE(vs.avg_daily_visits, 0) / usp.max_visits_per_day) * 100.0)
+                 END
+               )::numeric, 2) AS plan_adherence_rate,
+               SUM(COALESCE(orx.overdue_count, 0)) AS overdue_reschedules,
+               COUNT(*) FILTER (
+                 WHERE COALESCE(orx.overdue_count, 0) > 0
+                    OR (usp.user_id IS NULL)
+                    OR (
+                      COALESCE(vs.total_visits, 0) > 0
+                      AND (COALESCE(vs.workday_visits, 0)::numeric / NULLIF(COALESCE(vs.total_visits, 0), 0)) < 0.6
+                    )
+               ) AS at_risk_mr_count
+        FROM mr_scope ms
+        LEFT JOIN user_schedule_preferences usp ON usp.user_id = ms.id
+        LEFT JOIN visit_scope vs ON vs.user_id = ms.id
+        LEFT JOIN overdue_reschedules orx ON orx.user_id = ms.id
+        """;
+
+    return jdbc.query(sql, params, rs -> {
+      if (!rs.next()) {
+        return new ManagerCoachingSummaryResponse(0, 0, 0, 0, 0, 0, 0);
+      }
+      return new ManagerCoachingSummaryResponse(
+          rs.getLong("configured_schedule_count"),
+          rs.getLong("total_mr_count"),
+          rs.getDouble("schedule_coverage_rate"),
+          rs.getDouble("workday_visit_rate"),
+          rs.getDouble("plan_adherence_rate"),
+          rs.getLong("overdue_reschedules"),
+          rs.getLong("at_risk_mr_count")
+      );
+    });
+  }
+
+  private List<MrCoachingRowResponse> queryCoachingByMr(MapSqlParameterSource params) {
+    String sql = """
+        WITH mr_scope AS (
+          SELECT DISTINCT u.id, u.full_name
+          FROM users u
+          JOIN user_roles ur ON ur.user_id = u.id
+          JOIN roles r ON r.id = ur.role_id
+          WHERE r.name = 'MR'
+            AND (CAST(:mrId AS UUID) IS NULL OR u.id = CAST(:mrId AS UUID))
+            AND (
+              CAST(:territoryId AS UUID) IS NULL OR EXISTS (
+                SELECT 1
+                FROM territory_assignments ta
+                WHERE ta.user_id = u.id
+                  AND ta.territory_id = CAST(:territoryId AS UUID)
+                  AND ta.starts_on <= CURRENT_DATE
+                  AND (ta.ends_on IS NULL OR ta.ends_on >= CURRENT_DATE)
+              )
+            )
+        ),
+        daily_visits AS (
+          SELECT v.user_id,
+                 DATE(v.visit_time AT TIME ZONE 'UTC') AS visit_day,
+                 COUNT(*) AS daily_visits
+          FROM visits v
+          JOIN mr_scope ms ON ms.id = v.user_id
+          WHERE (CAST(:fromTs AS TIMESTAMP) IS NULL OR v.visit_time >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v.visit_time < CAST(:toTs AS TIMESTAMP))
+          GROUP BY v.user_id, DATE(v.visit_time AT TIME ZONE 'UTC')
+        ),
+        visit_stats AS (
+          SELECT v.user_id,
+                 COUNT(*) AS total_visits,
+                 COUNT(*) FILTER (
+                   WHERE usp.user_id IS NOT NULL
+                     AND CAST(v.visit_time AT TIME ZONE 'UTC' AS time) BETWEEN usp.workday_start AND usp.workday_end
+                     AND NOT (
+                       usp.break_start IS NOT NULL
+                       AND usp.break_end IS NOT NULL
+                       AND CAST(v.visit_time AT TIME ZONE 'UTC' AS time) BETWEEN usp.break_start AND usp.break_end
+                     )
+                 ) AS workday_visits,
+                 AVG(dv.daily_visits::numeric) AS avg_daily_visits
+          FROM visits v
+          JOIN mr_scope ms ON ms.id = v.user_id
+          LEFT JOIN user_schedule_preferences usp ON usp.user_id = v.user_id
+          JOIN daily_visits dv ON dv.user_id = v.user_id
+            AND dv.visit_day = DATE(v.visit_time AT TIME ZONE 'UTC')
+          WHERE (CAST(:fromTs AS TIMESTAMP) IS NULL OR v.visit_time >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR v.visit_time < CAST(:toTs AS TIMESTAMP))
+          GROUP BY v.user_id
+        ),
+        overdue_reschedules AS (
+          SELECT rf.created_by_user_id AS user_id, COUNT(*) AS overdue_count
+          FROM recommendation_feedback rf
+          JOIN recommendations r ON r.id = rf.recommendation_id
+          JOIN doctors d ON d.id = r.doctor_id
+          WHERE rf.status = 'RESCHEDULED'
+            AND rf.rescheduled_to IS NOT NULL
+            AND rf.rescheduled_to < CURRENT_TIMESTAMP
+            AND (CAST(:mrId AS UUID) IS NULL OR rf.created_by_user_id = CAST(:mrId AS UUID))
+            AND (CAST(:territoryId AS UUID) IS NULL OR d.territory_id = CAST(:territoryId AS UUID))
+            AND (CAST(:fromTs AS TIMESTAMP) IS NULL OR rf.created_at >= CAST(:fromTs AS TIMESTAMP))
+            AND (CAST(:toTs AS TIMESTAMP) IS NULL OR rf.created_at < CAST(:toTs AS TIMESTAMP))
+          GROUP BY rf.created_by_user_id
+        )
+        SELECT ms.id AS mr_id,
+               ms.full_name AS mr_name,
+               (usp.user_id IS NOT NULL) AS schedule_configured,
+               COALESCE(usp.max_visits_per_day, 0) AS max_visits_per_day,
+               COALESCE(vs.avg_daily_visits, 0) AS avg_visits_per_active_day,
+               ROUND((COALESCE(vs.workday_visits, 0)::numeric / NULLIF(COALESCE(vs.total_visits, 0), 0)) * 100.0, 2) AS workday_visit_rate,
+               COALESCE(orx.overdue_count, 0) AS overdue_reschedules
+        FROM mr_scope ms
+        LEFT JOIN user_schedule_preferences usp ON usp.user_id = ms.id
+        LEFT JOIN visit_stats vs ON vs.user_id = ms.id
+        LEFT JOIN overdue_reschedules orx ON orx.user_id = ms.id
+        ORDER BY overdue_reschedules DESC, workday_visit_rate ASC NULLS FIRST, ms.full_name
+        """;
+
+    return jdbc.query(sql, params, (rs, rowNum) -> {
+      boolean scheduleConfigured = rs.getBoolean("schedule_configured");
+      int maxVisitsPerDay = rs.getInt("max_visits_per_day");
+      double avgVisitsPerActiveDay = rs.getDouble("avg_visits_per_active_day");
+      double workdayVisitRate = rs.getObject("workday_visit_rate") == null ? 0.0 : rs.getDouble("workday_visit_rate");
+      long overdueReschedules = rs.getLong("overdue_reschedules");
+      String coachingFocus;
+      if (!scheduleConfigured) {
+        coachingFocus = "Set a day plan and work window";
+      } else if (overdueReschedules > 0) {
+        coachingFocus = "Clear overdue rescheduled recommendations";
+      } else if (workdayVisitRate > 0 && workdayVisitRate < 60) {
+        coachingFocus = "Shift visits into planned work windows";
+      } else if (maxVisitsPerDay > 0 && avgVisitsPerActiveDay > maxVisitsPerDay) {
+        coachingFocus = "Reduce overload against daily plan";
+      } else {
+        coachingFocus = "Maintain current field rhythm";
+      }
+
+      return new MrCoachingRowResponse(
+          readUuid(rs, "mr_id"),
+          rs.getString("mr_name"),
+          scheduleConfigured,
+          maxVisitsPerDay,
+          avgVisitsPerActiveDay,
+          workdayVisitRate,
+          overdueReschedules,
+          coachingFocus
+      );
+    });
+  }
+
+  private SalesTargetSummaryResponse querySalesTargetSummary(MapSqlParameterSource params) {
+    String sql = """
+        WITH target_scope AS (
+          SELECT t.*
+          FROM sr_weekly_targets t
+          WHERE t.week_start = CAST(:weekStart AS DATE)
+            AND (CAST(:territoryId AS UUID) IS NULL OR t.territory_id = CAST(:territoryId AS UUID))
+        ),
+        actual_scope AS (
+          SELECT t.id,
+                 COALESCE(SUM(poi.quantity), 0) AS actual_quantity,
+                 COALESCE(SUM(poi.amount), 0) AS actual_amount
+          FROM target_scope t
+          LEFT JOIN pharmacy_orders po ON po.sales_rep_user_id = t.sales_rep_user_id
+            AND (t.territory_id IS NULL OR po.territory_id = t.territory_id)
+            AND po.ordered_at >= CAST(:weekStart AS DATE)
+            AND po.ordered_at < CAST(:weekStart AS DATE) + INTERVAL '7 days'
+          LEFT JOIN pharmacy_order_items poi ON poi.order_id = po.id
+            AND poi.product_id = t.product_id
+          GROUP BY t.id
+        )
+        SELECT COUNT(*) AS active_target_count,
+               COALESCE(SUM(t.target_quantity), 0) AS target_quantity,
+               COALESCE(SUM(a.actual_quantity), 0) AS actual_quantity,
+               COALESCE(SUM(t.target_amount), 0) AS target_amount,
+               COALESCE(SUM(a.actual_amount), 0) AS actual_amount,
+               ROUND((COALESCE(SUM(a.actual_quantity), 0)::numeric / NULLIF(COALESCE(SUM(t.target_quantity), 0), 0)) * 100.0, 2) AS quantity_achievement_rate,
+               ROUND((COALESCE(SUM(a.actual_amount), 0)::numeric / NULLIF(COALESCE(SUM(t.target_amount), 0), 0)) * 100.0, 2) AS amount_achievement_rate
+        FROM target_scope t
+        LEFT JOIN actual_scope a ON a.id = t.id
+        """;
+
+    return jdbc.query(sql, params, rs -> {
+      if (!rs.next()) {
+        return new SalesTargetSummaryResponse(0, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO, 0, 0);
+      }
+      return new SalesTargetSummaryResponse(
+          rs.getInt("active_target_count"),
+          rs.getLong("target_quantity"),
+          rs.getLong("actual_quantity"),
+          rs.getBigDecimal("target_amount"),
+          rs.getBigDecimal("actual_amount"),
+          rs.getObject("quantity_achievement_rate") == null ? 0.0 : rs.getDouble("quantity_achievement_rate"),
+          rs.getObject("amount_achievement_rate") == null ? 0.0 : rs.getDouble("amount_achievement_rate")
+      );
+    });
+  }
+
+  private List<SalesRepTargetProgressResponse> querySalesTargetProgress(MapSqlParameterSource params) {
+    String sql = """
+        WITH target_scope AS (
+          SELECT t.*,
+                 u.full_name AS sales_rep_name,
+                 p.name AS product_name,
+                 tr.name AS territory_name
+          FROM sr_weekly_targets t
+          JOIN users u ON u.id = t.sales_rep_user_id
+          JOIN products p ON p.id = t.product_id
+          LEFT JOIN territories tr ON tr.id = t.territory_id
+          WHERE t.week_start = CAST(:weekStart AS DATE)
+            AND (CAST(:territoryId AS UUID) IS NULL OR t.territory_id = CAST(:territoryId AS UUID))
+        )
+        SELECT t.sales_rep_user_id,
+               t.sales_rep_name,
+               t.product_id,
+               t.product_name,
+               t.territory_id,
+               t.territory_name,
+               t.target_quantity,
+               COALESCE(SUM(poi.quantity), 0) AS actual_quantity,
+               t.target_amount,
+               COALESCE(SUM(poi.amount), 0) AS actual_amount,
+               ROUND((COALESCE(SUM(poi.quantity), 0)::numeric / NULLIF(t.target_quantity, 0)) * 100.0, 2) AS quantity_achievement_rate,
+               ROUND((COALESCE(SUM(poi.amount), 0)::numeric / NULLIF(t.target_amount, 0)) * 100.0, 2) AS amount_achievement_rate
+        FROM target_scope t
+        LEFT JOIN pharmacy_orders po ON po.sales_rep_user_id = t.sales_rep_user_id
+          AND (t.territory_id IS NULL OR po.territory_id = t.territory_id)
+          AND po.ordered_at >= CAST(:weekStart AS DATE)
+          AND po.ordered_at < CAST(:weekStart AS DATE) + INTERVAL '7 days'
+        LEFT JOIN pharmacy_order_items poi ON poi.order_id = po.id
+          AND poi.product_id = t.product_id
+        GROUP BY t.sales_rep_user_id, t.sales_rep_name, t.product_id, t.product_name, t.territory_id, t.territory_name, t.target_quantity, t.target_amount
+        ORDER BY quantity_achievement_rate ASC NULLS FIRST, t.sales_rep_name, t.product_name
+        """;
+
+    return jdbc.query(sql, params, (rs, rowNum) -> new SalesRepTargetProgressResponse(
+        readUuid(rs, "sales_rep_user_id"),
+        rs.getString("sales_rep_name"),
+        readUuid(rs, "product_id"),
+        rs.getString("product_name"),
+        readUuid(rs, "territory_id"),
+        rs.getString("territory_name"),
+        rs.getInt("target_quantity"),
+        rs.getLong("actual_quantity"),
+        rs.getBigDecimal("target_amount"),
+        rs.getBigDecimal("actual_amount"),
+        rs.getObject("quantity_achievement_rate") == null ? 0.0 : rs.getDouble("quantity_achievement_rate"),
+        rs.getObject("amount_achievement_rate") == null ? 0.0 : rs.getDouble("amount_achievement_rate")
     ));
   }
 

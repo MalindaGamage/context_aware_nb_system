@@ -4,7 +4,9 @@ import com.example.nba.dto.AssignTerritoryRequest;
 import com.example.nba.dto.CreateUserRequest;
 import com.example.nba.dto.TerritoryResponse;
 import com.example.nba.dto.UpdateUserRequest;
+import com.example.nba.dto.UpdateUserSchedulePreferenceRequest;
 import com.example.nba.dto.UserProfileResponse;
+import com.example.nba.dto.UserSchedulePreferenceResponse;
 import com.example.nba.dto.UserSummaryResponse;
 import jakarta.validation.Valid;
 import com.example.nba.service.UserService;
@@ -86,11 +88,48 @@ public class UserController {
     userService.deleteUser(userId, Set.of("MANAGER"));
   }
 
-  @PreAuthorize("hasAnyAuthority('ROLE_MR','ROLE_MANAGER','ROLE_ADMIN')")
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @GetMapping("/api/v1/users/sales-reps")
+  public List<UserProfileResponse> listSalesReps() {
+    return userService.listSalesRepProfiles();
+  }
+
+  @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+  @PostMapping("/api/v1/users/sales-reps")
+  public UserProfileResponse createSalesRep(@Valid @RequestBody CreateUserRequest request) {
+    return userService.createSalesRep(request);
+  }
+
+  @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+  @PutMapping("/api/v1/users/sales-reps/{userId}")
+  public UserProfileResponse updateSalesRep(@PathVariable UUID userId, @Valid @RequestBody UpdateUserRequest request) {
+    return userService.updateUser(userId, request, Set.of("SALES_REP"));
+  }
+
+  @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+  @DeleteMapping("/api/v1/users/sales-reps/{userId}")
+  public void deleteSalesRep(@PathVariable UUID userId) {
+    userService.deleteUser(userId, Set.of("SALES_REP"));
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MR','ROLE_SALES_REP','ROLE_MANAGER','ROLE_ADMIN')")
   @GetMapping("/api/v1/users/me/territories")
   public List<TerritoryResponse> myTerritories(@AuthenticationPrincipal Jwt jwt) {
     UUID userId = UUID.fromString(jwt.getSubject());
     return userService.listTerritoriesForUser(userId);
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MR','ROLE_MANAGER','ROLE_ADMIN')")
+  @GetMapping("/api/v1/users/me/schedule")
+  public UserSchedulePreferenceResponse mySchedule(@AuthenticationPrincipal Jwt jwt) {
+    return userService.getSchedulePreference(UUID.fromString(jwt.getSubject()));
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MR','ROLE_MANAGER','ROLE_ADMIN')")
+  @PutMapping("/api/v1/users/me/schedule")
+  public UserSchedulePreferenceResponse updateMySchedule(@AuthenticationPrincipal Jwt jwt,
+                                                         @Valid @RequestBody UpdateUserSchedulePreferenceRequest request) {
+    return userService.updateSchedulePreference(UUID.fromString(jwt.getSubject()), request);
   }
 
   @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")

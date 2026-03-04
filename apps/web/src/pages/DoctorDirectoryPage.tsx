@@ -125,6 +125,10 @@ export default function DoctorDirectoryPage() {
     notes: "",
     whatsappNumber: "",
     email: "",
+    targetProductFocus: "",
+    availabilityPattern: "",
+    availabilityWindow: "",
+    schedulingNotes: "",
     lat: "",
     lon: "",
   });
@@ -213,6 +217,10 @@ export default function DoctorDirectoryPage() {
       notes: "",
       whatsappNumber: "",
       email: "",
+      targetProductFocus: "",
+      availabilityPattern: "",
+      availabilityWindow: "",
+      schedulingNotes: "",
       lat: "",
       lon: "",
     });
@@ -229,6 +237,10 @@ export default function DoctorDirectoryPage() {
       notes: doctor.notes || "",
       whatsappNumber: getWhatsappNumber(doctor) || "",
       email: getEmailAddress(doctor) || "",
+      targetProductFocus: doctor.targetProductFocus || "",
+      availabilityPattern: doctor.availabilityPattern || "",
+      availabilityWindow: doctor.availabilityWindow || "",
+      schedulingNotes: doctor.schedulingNotes || "",
       lat: doctor.lat == null ? "" : String(doctor.lat),
       lon: doctor.lon == null ? "" : String(doctor.lon),
     });
@@ -269,6 +281,10 @@ export default function DoctorDirectoryPage() {
       notes: doctorForm.notes.trim() || undefined,
       whatsappNumber: doctorForm.whatsappNumber.trim() || undefined,
       email: doctorForm.email.trim() || undefined,
+      targetProductFocus: doctorForm.targetProductFocus.trim() || undefined,
+      availabilityPattern: doctorForm.availabilityPattern.trim() || undefined,
+      availabilityWindow: doctorForm.availabilityWindow.trim() || undefined,
+      schedulingNotes: doctorForm.schedulingNotes.trim() || undefined,
       lat: latValue,
       lon: lonValue,
     };
@@ -377,6 +393,26 @@ export default function DoctorDirectoryPage() {
               onChange={(event) => setDoctorForm((state) => ({ ...state, email: event.target.value }))}
             />
             <input
+              placeholder="Target product focus"
+              value={doctorForm.targetProductFocus}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, targetProductFocus: event.target.value }))}
+            />
+            <input
+              placeholder="Availability pattern"
+              value={doctorForm.availabilityPattern}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, availabilityPattern: event.target.value }))}
+            />
+            <input
+              placeholder="Availability window"
+              value={doctorForm.availabilityWindow}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, availabilityWindow: event.target.value }))}
+            />
+            <input
+              placeholder="Scheduling notes"
+              value={doctorForm.schedulingNotes}
+              onChange={(event) => setDoctorForm((state) => ({ ...state, schedulingNotes: event.target.value }))}
+            />
+            <input
               placeholder="Latitude"
               value={doctorForm.lat}
               onChange={(event) => setDoctorForm((state) => ({ ...state, lat: event.target.value }))}
@@ -473,6 +509,8 @@ export default function DoctorDirectoryPage() {
               <th>Tier</th>
               <th>Territory</th>
               <th>Priority</th>
+              <th>Product Focus</th>
+              <th>Availability</th>
               <th>Location</th>
               <th>Contact</th>
               {canManageDoctors && <th>Actions</th>}
@@ -481,7 +519,7 @@ export default function DoctorDirectoryPage() {
           <tbody>
             {doctors.length === 0 ? (
               <tr>
-                <td colSpan={canManageDoctors ? 8 : 7} className="muted">No doctors found for current segmentation.</td>
+                <td colSpan={canManageDoctors ? 10 : 9} className="muted">No doctors found for current segmentation.</td>
               </tr>
             ) : null}
             {doctors.map((doctor) => {
@@ -498,6 +536,11 @@ export default function DoctorDirectoryPage() {
                   <td><Pill>{doctor.tier}</Pill></td>
                   <td>{doctor.territoryId ? "Assigned" : "Unassigned"}</td>
                   <td>{doctor.priorityScore}</td>
+                  <td>{doctor.targetProductFocus || "Not set"}</td>
+                  <td>
+                    <div>{doctor.availabilityWindow || "No window"}</div>
+                    <div className="muted">{doctor.availabilityPattern || doctor.schedulingNotes || "No schedule details"}</div>
+                  </td>
                   <td>{formatGeoPoint(doctor)}</td>
                   <td>
                     <div className="pn-contact-links">

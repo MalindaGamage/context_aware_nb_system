@@ -3,14 +3,24 @@ import {
   activateScoringConfig,
   assignDoctorTerritory,
   createScoringConfig,
+  fetchAdminProducts,
+  fetchMrProfiles,
+  fetchEvaluationSummary,
   fetchActiveScoringConfig,
   fetchAuditLogs,
   fetchDoctors,
   fetchRecommendationLogs,
   fetchScoringConfigs,
+  fetchSalesReps,
   fetchTerritories,
+  fetchUserAssignedProducts,
+  replaceUserAssignedProducts,
   type AuditLog,
   type Doctor,
+  type EvaluationSummary,
+  type UserProfile,
+  type UserProductAssignment,
+  type ProductSummary,
   type RecommendationLog,
   type ScoringConfig,
   type Territory,
@@ -43,6 +53,21 @@ const defaultSegments = [
   { name: "Follow-Up", followUpRequired: true, scoreBonus: 3 },
 ];
 
+const defaultEvaluation: EvaluationSummary = {
+  totalRecommendations: 0,
+  recommendationsWithFeedback: 0,
+  feedbackCoverageRate: 0,
+  doneRate: 0,
+  skippedRate: 0,
+  rescheduledRate: 0,
+  overrideRate: 0,
+  avgFeedbackLatencyHours: 0,
+  visitFollowThroughRate: 0,
+  avgScoreAccepted: 0,
+  avgScoreSkipped: 0,
+  topDriverEffectiveness: [],
+};
+
 export default function AdminGovernancePanel({ token }: Props) {
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [activeConfig, setActiveConfig] = useState<ScoringConfig | null>(null);
@@ -56,22 +81,32 @@ export default function AdminGovernancePanel({ token }: Props) {
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [doctorId, setDoctorId] = useState("");
   const [territoryId, setTerritoryId] = useState("");
+  const [fieldUsers, setFieldUsers] = useState<UserProfile[]>([]);
+  const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [assignmentUserId, setAssignmentUserId] = useState("");
+  const [assignedProducts, setAssignedProducts] = useState<UserProductAssignment[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [recommendationLogs, setRecommendationLogs] = useState<RecommendationLog[]>([]);
+  const [evaluation, setEvaluation] = useState<EvaluationSummary>(defaultEvaluation);
   const [status, setStatus] = useState("");
 
   const sortedConfigs = useMemo(() => [...configs].sort((a, b) => b.version - a.version), [configs]);
 
   const loadData = async () => {
     try {
-      const [loadedConfigs, loadedActive, doctorPage, loadedTerritories, loadedAudits, loadedRecLogs] = await Promise.all([
+      const [loadedConfigs, loadedActive, doctorPage, loadedTerritories, loadedAudits, loadedRecLogs, loadedEvaluation, loadedMrs, loadedSalesReps, loadedProducts] = await Promise.all([
         fetchScoringConfigs(token),
         fetchActiveScoringConfig(token),
         fetchDoctors(token, {}),
         fetchTerritories(token),
         fetchAuditLogs(token, { size: 20 }),
         fetchRecommendationLogs(token, { size: 20 }),
+        fetchEvaluationSummary(token, {}),
+        fetchMrProfiles(token),
+        fetchSalesReps(token),
+        fetchAdminProducts(token),
       ]);
       setConfigs(loadedConfigs);
       setActiveConfig(loadedActive);
@@ -79,6 +114,13 @@ export default function AdminGovernancePanel({ token }: Props) {
       setTerritories(loadedTerritories);
       setAuditLogs(loadedAudits.content);
       setRecommendationLogs(loadedRecLogs.content);
+      setEvaluation(loadedEvaluation);
+      setProducts(loadedProducts);
+      const mergedUsers = [...loadedMrs, ...loadedSalesReps];
+      setFieldUsers(mergedUsers);
+      if (mergedUsers[0]) {
+        setAssignmentUserId((current) => current || mergedUsers[0].id);
+      }
     } catch {
       setStatus("Failed to load governance data");
     }
@@ -87,6 +129,19 @@ export default function AdminGovernancePanel({ token }: Props) {
   useEffect(() => {
     void loadData();
   }, [token]);
+
+  useEffect(() => {
+    if (!assignmentUserId) return;
+    void fetchUserAssignedProducts(token, assignmentUserId)
+      .then((rows) => {
+        setAssignedProducts(rows);
+        setSelectedProductIds(rows.map((row) => row.productId));
+      })
+      .catch(() => {
+        setAssignedProducts([]);
+        setSelectedProductIds([]);
+      });
+  }, [assignmentUserId, token]);
 
   const createConfig = async () => {
     try {
@@ -119,6 +174,17 @@ export default function AdminGovernancePanel({ token }: Props) {
       await loadData();
     } catch {
       setStatus("Failed to update doctor territory");
+    }
+  };
+
+  const saveProductAssignments = async () => {
+    if (!assignmentUserId) return;
+    try {
+      const result = await replaceUserAssignedProducts(token, assignmentUserId, { productIds: selectedProductIds });
+      setAssignedProducts(result);
+      setStatus("User product assignments updated");
+    } catch {
+      setStatus("Failed to update user product assignments");
     }
   };
 
@@ -168,6 +234,41 @@ export default function AdminGovernancePanel({ token }: Props) {
       </Card>
 
       <Card>
+        <SectionTitle title="Field Product Assignment" subtitle="Assign 5-6 company brands to MRs and Sales Reps." />
+        <div className="inline-form">
+          <Field label="Field User">
+            <select value={assignmentUserId} onChange={(event) => setAssignmentUserId(event.target.value)}>
+              <option value="">Select user</option>
+              {fieldUsers.map((user) => (
+                <option key={user.id} value={user.id}>{user.fullName} ({user.role})</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Products">
+            <select
+              multiple
+              value={selectedProductIds}
+              onChange={(event) =>
+                setSelectedProductIds(Array.from(event.target.selectedOptions).map((option) => option.value))
+              }
+            >
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button onClick={saveProductAssignments}>Save Assignments</Button>
+        </div>
+        <div className="chips">
+          {assignedProducts.map((product) => (
+            <Pill key={product.productId}>{product.brandName || product.productName}</Pill>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
         <SectionTitle title="Doctor Territory Workflow" subtitle="Assign doctor to territory (or clear assignment)." />
         <div className="inline-form">
           <Field label="Doctor">
@@ -210,6 +311,27 @@ export default function AdminGovernancePanel({ token }: Props) {
       </Card>
 
       <Card>
+        <SectionTitle title="Evaluation Summary" subtitle="Core KPIs for offline analysis, user assessment, and continuous improvement." />
+        <div className="pn-kpi-grid">
+          <div className="pn-kpi"><span>Feedback Coverage</span><strong>{evaluation.feedbackCoverageRate.toFixed(0)}%</strong><em>{evaluation.recommendationsWithFeedback}/{evaluation.totalRecommendations}</em></div>
+          <div className="pn-kpi"><span>Done Rate</span><strong>{evaluation.doneRate.toFixed(0)}%</strong><em>accepted recommendations</em></div>
+          <div className="pn-kpi"><span>Follow-Through</span><strong>{evaluation.visitFollowThroughRate.toFixed(0)}%</strong><em>visited within 7 days</em></div>
+          <div className="pn-kpi"><span>Avg Feedback Latency</span><strong>{evaluation.avgFeedbackLatencyHours.toFixed(1)}h</strong><em>time to feedback</em></div>
+        </div>
+        <div className="table-list">
+          {evaluation.topDriverEffectiveness.map((driver) => (
+            <div key={driver.driverKey} className="table-row">
+              <div>
+                <strong>{driver.driverKey}</strong>
+                <p className="muted">{driver.recommendationCount} recommendations observed</p>
+              </div>
+              <Pill>{driver.doneRate.toFixed(0)}% done</Pill>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
         <SectionTitle title="Recommendation Logs" subtitle="Trace recommendations, drivers, and latest feedback state." />
         <div className="table-list">
           {recommendationLogs.map((log) => (
@@ -219,6 +341,8 @@ export default function AdminGovernancePanel({ token }: Props) {
                 <p className="muted">
                   Score {log.score.toFixed(2)} | {new Date(log.createdAt).toLocaleString()} | {log.latestFeedbackStatus ?? "No feedback"}
                 </p>
+                {log.recommendedAction && <p><strong>Action:</strong> {log.recommendedAction}</p>}
+                {log.recommendedMessage && <p className="muted">{log.recommendedMessage}</p>}
                 <p>{log.explanation}</p>
               </div>
             </div>

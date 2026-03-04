@@ -12,5 +12,9 @@ public record NbaRecommendationResponse(
     int priorityScore,
     double score,
     String explanation,
+    String recommendedAction,
+    String recommendedMessage,
+    UUID recommendedPharmacyId,
+    String recommendedPharmacyName,
     List<RecommendationFactorResponse> drivers
 ) {}

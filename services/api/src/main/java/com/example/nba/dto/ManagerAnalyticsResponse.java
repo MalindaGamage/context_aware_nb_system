@@ -6,5 +6,9 @@ public record ManagerAnalyticsResponse(
     List<CoverageTierAnalyticsResponse> coverageByTier,
     List<MissedHighPriorityResponse> missedHighPriority,
     ComplianceAnalyticsResponse compliance,
-    List<MrComplianceRowResponse> complianceByMr
+    List<MrComplianceRowResponse> complianceByMr,
+    ManagerCoachingSummaryResponse coachingSummary,
+    List<MrCoachingRowResponse> coachingByMr,
+    SalesTargetSummaryResponse salesTargetSummary,
+    List<SalesRepTargetProgressResponse> salesTargetProgress
 ) {}

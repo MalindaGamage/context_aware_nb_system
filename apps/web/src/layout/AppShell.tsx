@@ -23,15 +23,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav>
-          <Link className={location.pathname === "/mr" ? "active" : ""} to="/mr">
-            NBA Dashboard
-          </Link>
-          <Link className={location.pathname === "/doctors" ? "active" : ""} to="/doctors">
-            Doctor Directory
-          </Link>
-          <Link className={location.pathname === "/visits" ? "active" : ""} to="/visits">
-            Visit Log
-          </Link>
+          {role !== "SALES_REP" && (
+            <Link className={location.pathname === "/mr" ? "active" : ""} to="/mr">
+              NBA Dashboard
+            </Link>
+          )}
+          {(role === "SALES_REP" || role === "MANAGER" || role === "ADMIN") && (
+            <Link className={location.pathname === "/sales" ? "active" : ""} to="/sales">
+              Sales Dashboard
+            </Link>
+          )}
+          {role !== "SALES_REP" && (
+            <Link className={location.pathname === "/doctors" ? "active" : ""} to="/doctors">
+              Doctor Directory
+            </Link>
+          )}
+          {role !== "SALES_REP" && (
+            <Link className={location.pathname === "/visits" ? "active" : ""} to="/visits">
+              Visit Log
+            </Link>
+          )}
           {(role === "MANAGER" || role === "ADMIN") && (
             <Link className={location.pathname === "/manager" ? "active" : ""} to="/manager">
               Manager Dashboard

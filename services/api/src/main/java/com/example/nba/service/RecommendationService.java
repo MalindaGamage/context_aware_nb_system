@@ -78,6 +78,10 @@ public class RecommendationService {
       recommendation.setMessageId(null);
       recommendation.setScore(BigDecimal.valueOf(item.score()));
       recommendation.setExplanation(item.explanation());
+      recommendation.setRecommendedAction(item.recommended_action());
+      recommendation.setRecommendedMessage(item.recommended_message());
+      recommendation.setRecommendedPharmacyId(item.recommended_pharmacy_id());
+      recommendation.setRecommendedPharmacyName(item.recommended_pharmacy_name());
       recommendation.setCreatedAt(now);
       persisted.add(recommendation);
 
@@ -127,6 +131,10 @@ public class RecommendationService {
           doctor != null ? doctor.getPriorityScore() : 0,
           recommendation.getScore().doubleValue(),
           recommendation.getExplanation(),
+          recommendation.getRecommendedAction(),
+          recommendation.getRecommendedMessage(),
+          recommendation.getRecommendedPharmacyId(),
+          recommendation.getRecommendedPharmacyName(),
           driversByRecommendation.getOrDefault(recommendation.getId(), List.of())
       ));
     }

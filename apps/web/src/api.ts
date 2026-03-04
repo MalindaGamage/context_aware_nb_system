@@ -14,6 +14,10 @@ export type Doctor = {
   email?: string | null;
   emailAddress?: string | null;
   email_address?: string | null;
+  targetProductFocus?: string | null;
+  availabilityPattern?: string | null;
+  availabilityWindow?: string | null;
+  schedulingNotes?: string | null;
   lat?: number | null;
   lon?: number | null;
 };
@@ -22,6 +26,30 @@ export type Territory = {
   id: string;
   name: string;
   code: string;
+};
+
+export type Pharmacy = {
+  id: string;
+  name: string;
+  code: string;
+  googlePlaceId: string | null;
+  address: string | null;
+  territoryId: string | null;
+  contactNumber: string | null;
+  notes: string | null;
+  lat?: number | null;
+  lon?: number | null;
+};
+
+export type ImportGooglePharmacyRequest = {
+  googlePlaceId: string;
+  name: string;
+  territoryId: string;
+  address?: string;
+  contactNumber?: string;
+  notes?: string;
+  lat: number;
+  lon: number;
 };
 
 export type PageResponse<T> = {
@@ -78,11 +106,36 @@ export type MrComplianceRow = {
   skippedRate: number;
 };
 
+export type ManagerCoachingSummary = {
+  configuredScheduleCount: number;
+  totalMrCount: number;
+  scheduleCoverageRate: number;
+  workdayVisitRate: number;
+  planAdherenceRate: number;
+  overdueReschedules: number;
+  atRiskMrCount: number;
+};
+
+export type MrCoachingRow = {
+  mrId: string;
+  mrName: string;
+  scheduleConfigured: boolean;
+  maxVisitsPerDay: number;
+  avgVisitsPerActiveDay: number;
+  workdayVisitRate: number;
+  overdueReschedules: number;
+  coachingFocus: string;
+};
+
 export type ManagerAnalyticsResponse = {
   coverageByTier: CoverageTierAnalytics[];
   missedHighPriority: MissedHighPriority[];
   compliance: ComplianceAnalytics;
   complianceByMr: MrComplianceRow[];
+  coachingSummary: ManagerCoachingSummary;
+  coachingByMr: MrCoachingRow[];
+  salesTargetSummary: SalesTargetSummary;
+  salesTargetProgress: SalesRepTargetProgress[];
 };
 
 export type TerritoryOverview = {
@@ -100,8 +153,45 @@ export type UserProfile = {
   fullName: string;
   email: string;
   active: boolean;
-  role: "MR" | "MANAGER" | "ADMIN";
+  role: "MR" | "MANAGER" | "ADMIN" | "SALES_REP";
   territories: Territory[];
+};
+
+export type UserProductAssignment = {
+  productId: string;
+  productName: string;
+  productCode: string;
+  brandName: string | null;
+  manufacturerType: string | null;
+  active: boolean;
+  startsOn: string;
+  endsOn: string | null;
+};
+
+export type AssignUserProductsRequest = {
+  productIds: string[];
+};
+
+export type UserSchedulePreference = {
+  userId: string;
+  workdayStart: string;
+  workdayEnd: string;
+  breakStart: string | null;
+  breakEnd: string | null;
+  maxVisitsPerDay: number;
+  baseLocationText: string | null;
+  planningNotes: string | null;
+  updatedAt: string;
+};
+
+export type UpdateUserSchedulePreferenceRequest = {
+  workdayStart: string;
+  workdayEnd: string;
+  breakStart?: string | null;
+  breakEnd?: string | null;
+  maxVisitsPerDay: number;
+  baseLocationText?: string;
+  planningNotes?: string;
 };
 
 export type CreateUserRequest = {
@@ -138,6 +228,10 @@ export type CreateDoctorRequest = {
   notes?: string;
   whatsappNumber?: string;
   email?: string;
+  targetProductFocus?: string;
+  availabilityPattern?: string;
+  availabilityWindow?: string;
+  schedulingNotes?: string;
   lat?: number;
   lon?: number;
 };
@@ -162,6 +256,111 @@ export type ProductSummary = {
   category: string;
   active: boolean;
   assignedDoctors: number;
+};
+
+export type PharmacyOrderItemRequest = {
+  productId: string;
+  quantity: number;
+  amount: number;
+};
+
+export type CreatePharmacyOrderRequest = {
+  pharmacyId: string;
+  orderedAt: string;
+  notes?: string;
+  clientReferenceId?: string;
+  items: PharmacyOrderItemRequest[];
+};
+
+export type PharmacyOrderResponse = {
+  orderId: string;
+  pharmacyId: string;
+  pharmacyName: string;
+  salesRepUserId: string;
+  orderedAt: string;
+  totalAmount: number;
+  totalQuantity: number;
+  notes: string | null;
+};
+
+export type CreatePharmacyFeedbackRequest = {
+  pharmacyId: string;
+  productId: string;
+  doctorId?: string;
+  capturedAt: string;
+  prescribed?: boolean;
+  stockAvailable?: boolean;
+  notes?: string;
+};
+
+export type PharmacyFeedbackResponse = {
+  id: string;
+  pharmacyId: string;
+  productId: string;
+  mrUserId: string;
+  doctorId: string | null;
+  capturedAt: string;
+  prescribed: boolean | null;
+  stockAvailable: boolean | null;
+  notes: string | null;
+};
+
+export type SalesTrendPoint = {
+  bucket: string;
+  orderCount: number;
+  totalQuantity: number;
+  totalAmount: number;
+};
+
+export type SalesTrendResponse = {
+  series: SalesTrendPoint[];
+};
+
+export type SalesTargetSummary = {
+  activeTargetCount: number;
+  targetQuantity: number;
+  actualQuantity: number;
+  targetAmount: number;
+  actualAmount: number;
+  quantityAchievementRate: number;
+  amountAchievementRate: number;
+};
+
+export type SalesRepTargetProgress = {
+  salesRepUserId: string;
+  salesRepName: string;
+  productId: string;
+  productName: string;
+  territoryId: string | null;
+  territoryName: string | null;
+  targetQuantity: number;
+  actualQuantity: number;
+  targetAmount: number;
+  actualAmount: number;
+  quantityAchievementRate: number;
+  amountAchievementRate: number;
+};
+
+export type SalesRepWeeklyTarget = {
+  id: string;
+  salesRepUserId: string;
+  salesRepName: string;
+  productId: string;
+  productName: string;
+  territoryId: string | null;
+  territoryName: string | null;
+  weekStart: string;
+  targetQuantity: number;
+  targetAmount: number;
+};
+
+export type UpsertSalesRepWeeklyTargetRequest = {
+  salesRepUserId: string;
+  productId: string;
+  territoryId?: string | null;
+  weekStart: string;
+  targetQuantity: number;
+  targetAmount: number;
 };
 
 export type CreateScoringConfigRequest = {
@@ -189,11 +388,34 @@ export type RecommendationLog = {
   doctorName: string;
   score: number;
   explanation: string;
+  recommendedAction: string | null;
+  recommendedMessage: string | null;
   createdAt: string;
   drivers: RecommendationDriver[];
   latestFeedbackStatus: string | null;
   latestFeedbackReason: string | null;
   latestOverrideDoctorId: string | null;
+};
+
+export type EvaluationDriverMetric = {
+  driverKey: string;
+  recommendationCount: number;
+  doneRate: number;
+};
+
+export type EvaluationSummary = {
+  totalRecommendations: number;
+  recommendationsWithFeedback: number;
+  feedbackCoverageRate: number;
+  doneRate: number;
+  skippedRate: number;
+  rescheduledRate: number;
+  overrideRate: number;
+  avgFeedbackLatencyHours: number;
+  visitFollowThroughRate: number;
+  avgScoreAccepted: number;
+  avgScoreSkipped: number;
+  topDriverEffectiveness: EvaluationDriverMetric[];
 };
 
 export type Visit = {
@@ -240,6 +462,10 @@ export type NbaRecommendation = {
   priorityScore: number;
   score: number;
   explanation: string;
+  recommendedAction?: string | null;
+  recommendedMessage?: string | null;
+  recommendedPharmacyId?: string | null;
+  recommendedPharmacyName?: string | null;
   drivers: RecommendationDriver[];
 };
 
@@ -337,7 +563,7 @@ function decodePrimaryRole(accessToken: string): string {
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
     const payload = JSON.parse(atob(padded));
     const roles: string[] = payload?.realm_access?.roles ?? [];
-    return roles.find((role) => ["ADMIN", "MANAGER", "MR"].includes(role)) ?? roles[0] ?? "";
+    return roles.find((role) => ["ADMIN", "MANAGER", "MR", "SALES_REP"].includes(role)) ?? roles[0] ?? "";
   } catch {
     return "";
   }
@@ -392,6 +618,39 @@ export async function fetchDoctors(
   return (await res.json()) as PageResponse<Doctor>;
 }
 
+export async function fetchPharmacies(
+  token: string,
+  params: { territoryId?: string; page?: number; size?: number }
+) {
+  const search = new URLSearchParams();
+  if (params.territoryId) search.set("territoryId", params.territoryId);
+  search.set("page", String(params.page ?? 0));
+  search.set("size", String(params.size ?? 100));
+  const res = await fetch(`${apiBase}/pharmacies?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load pharmacies");
+  return (await res.json()) as PageResponse<Pharmacy>;
+}
+
+export async function importGooglePharmacy(token: string, request: ImportGooglePharmacyRequest) {
+  const res = await fetch(`${apiBase}/pharmacies/import-google`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to import pharmacy from Google Maps");
+  return (await res.json()) as Pharmacy;
+}
+
+export async function fetchNearbyPharmacies(token: string, lat: number, lon: number, radiusKm: number) {
+  const res = await fetch(`${apiBase}/pharmacies/nearby?lat=${lat}&lon=${lon}&radiusKm=${radiusKm}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load pharmacies");
+  return (await res.json()) as Pharmacy[];
+}
+
 export async function fetchNearbyDoctors(token: string, lat: number, lon: number, radiusKm: number) {
   const res = await fetch(`${apiBase}/doctors/nearby?lat=${lat}&lon=${lon}&radiusKm=${radiusKm}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -444,6 +703,27 @@ export async function fetchMyTerritories(token: string) {
   return (await res.json()) as Territory[];
 }
 
+export async function fetchMySchedulePreference(token: string) {
+  const res = await fetch(`${apiBase}/users/me/schedule`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load schedule preference");
+  return (await res.json()) as UserSchedulePreference;
+}
+
+export async function updateMySchedulePreference(
+  token: string,
+  request: UpdateUserSchedulePreferenceRequest
+) {
+  const res = await fetch(`${apiBase}/users/me/schedule`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update schedule preference");
+  return (await res.json()) as UserSchedulePreference;
+}
+
 export async function fetchMrSummaries(token: string) {
   const res = await fetch(`${apiBase}/users/mrs`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -457,6 +737,14 @@ export async function fetchMrProfiles(token: string) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Failed to load MRs");
+  return (await res.json()) as UserProfile[];
+}
+
+export async function fetchSalesReps(token: string) {
+  const res = await fetch(`${apiBase}/users/sales-reps`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load sales reps");
   return (await res.json()) as UserProfile[];
 }
 
@@ -637,13 +925,14 @@ export async function fetchNbaNext(token: string, limit = 5) {
 
 export async function fetchManagerAnalytics(
   token: string,
-  params: { mrId?: string; territoryId?: string; from?: string; to?: string }
+  params: { mrId?: string; territoryId?: string; from?: string; to?: string; weekStart?: string }
 ) {
   const search = new URLSearchParams();
   if (params.mrId) search.set("mrId", params.mrId);
   if (params.territoryId) search.set("territoryId", params.territoryId);
   if (params.from) search.set("from", params.from);
   if (params.to) search.set("to", params.to);
+  if (params.weekStart) search.set("weekStart", params.weekStart);
   const res = await fetch(`${apiBase}/analytics/manager?${search.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -758,10 +1047,108 @@ export async function fetchRecommendationLogs(
   return (await res.json()) as PageResponse<RecommendationLog>;
 }
 
+export async function fetchEvaluationSummary(
+  token: string,
+  params: { userId?: string; doctorId?: string; from?: string; to?: string }
+) {
+  const search = new URLSearchParams();
+  if (params.userId) search.set("userId", params.userId);
+  if (params.doctorId) search.set("doctorId", params.doctorId);
+  if (params.from) search.set("from", params.from);
+  if (params.to) search.set("to", params.to);
+  const res = await fetch(`${apiBase}/admin/evaluation-summary?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load evaluation summary");
+  return (await res.json()) as EvaluationSummary;
+}
+
 export async function fetchAdminProducts(token: string) {
   const res = await fetch(`${apiBase}/admin/products`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Failed to load products");
   return (await res.json()) as ProductSummary[];
+}
+
+export async function fetchMyAssignedProducts(token: string) {
+  const res = await fetch(`${apiBase}/users/me/products`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load assigned products");
+  return (await res.json()) as UserProductAssignment[];
+}
+
+export async function fetchUserAssignedProducts(token: string, userId: string) {
+  const res = await fetch(`${apiBase}/users/${userId}/products`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load user products");
+  return (await res.json()) as UserProductAssignment[];
+}
+
+export async function replaceUserAssignedProducts(token: string, userId: string, request: AssignUserProductsRequest) {
+  const res = await fetch(`${apiBase}/users/${userId}/products`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to assign products");
+  return (await res.json()) as UserProductAssignment[];
+}
+
+export async function createPharmacyOrder(token: string, request: CreatePharmacyOrderRequest) {
+  const res = await fetch(`${apiBase}/pharmacy-orders`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to capture pharmacy order");
+  return (await res.json()) as PharmacyOrderResponse;
+}
+
+export async function capturePharmacyFeedback(token: string, request: CreatePharmacyFeedbackRequest) {
+  const res = await fetch(`${apiBase}/pharmacy-feedback`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to capture pharmacy feedback");
+  return (await res.json()) as PharmacyFeedbackResponse;
+}
+
+export async function fetchSalesTrend(
+  token: string,
+  params: { productId?: string; territoryId?: string; from?: string; to?: string }
+) {
+  const search = new URLSearchParams();
+  if (params.productId) search.set("productId", params.productId);
+  if (params.territoryId) search.set("territoryId", params.territoryId);
+  if (params.from) search.set("from", params.from);
+  if (params.to) search.set("to", params.to);
+  const res = await fetch(`${apiBase}/analytics/sales?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load sales trend");
+  return (await res.json()) as SalesTrendResponse;
+}
+
+export async function fetchSalesTargets(token: string, weekStart?: string) {
+  const search = new URLSearchParams();
+  if (weekStart) search.set("weekStart", weekStart);
+  const res = await fetch(`${apiBase}/sales-targets?${search.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load sales targets");
+  return (await res.json()) as SalesRepWeeklyTarget[];
+}
+
+export async function upsertSalesTarget(token: string, request: UpsertSalesRepWeeklyTargetRequest) {
+  const res = await fetch(`${apiBase}/sales-targets`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to save sales target");
+  return (await res.json()) as SalesRepWeeklyTarget;
 }

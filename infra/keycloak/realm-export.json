@@ -4,6 +4,7 @@
   "roles": {
     "realm": [
       {"name": "MR"},
+      {"name": "SALES_REP"},
       {"name": "MANAGER"},
       {"name": "ADMIN"}
     ]
@@ -39,6 +40,13 @@
       "enabled": true,
       "credentials": [{"type": "password", "value": "password", "temporary": false}],
       "realmRoles": ["ADMIN"]
+    },
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "username": "sales1",
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "password", "temporary": false}],
+      "realmRoles": ["SALES_REP"]
     }
   ]
 }

@@ -7,5 +7,9 @@ public record RecommenderItem(
     UUID doctor_id,
     double score,
     String explanation,
+    String recommended_action,
+    String recommended_message,
+    UUID recommended_pharmacy_id,
+    String recommended_pharmacy_name,
     List<RecommenderFactor> factors
 ) {}

@@ -12,6 +12,10 @@ public record DoctorResponse(
     String notes,
     String whatsappNumber,
     String email,
+    String targetProductFocus,
+    String availabilityPattern,
+    String availabilityWindow,
+    String schedulingNotes,
     Double lat,
     Double lon
 ) {}

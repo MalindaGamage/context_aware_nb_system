@@ -42,6 +42,18 @@ public class Doctor {
   @Column
   private String email;
 
+  @Column(name = "target_product_focus")
+  private String targetProductFocus;
+
+  @Column(name = "availability_pattern")
+  private String availabilityPattern;
+
+  @Column(name = "availability_window")
+  private String availabilityWindow;
+
+  @Column(name = "scheduling_notes")
+  private String schedulingNotes;
+
   @Column(name = "created_at", nullable = false)
   private OffsetDateTime createdAt;
 
@@ -77,6 +89,18 @@ public class Doctor {
 
   public String getEmail() { return email; }
   public void setEmail(String email) { this.email = email; }
+
+  public String getTargetProductFocus() { return targetProductFocus; }
+  public void setTargetProductFocus(String targetProductFocus) { this.targetProductFocus = targetProductFocus; }
+
+  public String getAvailabilityPattern() { return availabilityPattern; }
+  public void setAvailabilityPattern(String availabilityPattern) { this.availabilityPattern = availabilityPattern; }
+
+  public String getAvailabilityWindow() { return availabilityWindow; }
+  public void setAvailabilityWindow(String availabilityWindow) { this.availabilityWindow = availabilityWindow; }
+
+  public String getSchedulingNotes() { return schedulingNotes; }
+  public void setSchedulingNotes(String schedulingNotes) { this.schedulingNotes = schedulingNotes; }
 
   public OffsetDateTime getCreatedAt() { return createdAt; }
   public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }

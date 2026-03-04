@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
-type AccountRole = "MR" | "MANAGER" | "ADMIN";
+type AccountRole = "MR" | "SALES_REP" | "MANAGER" | "ADMIN";
 
 const ROLE_PRESETS: Record<AccountRole, { username: string; label: string }> = {
   MR: { username: "mr1", label: "Med Rep" },
+  SALES_REP: { username: "sales1", label: "Sales Rep" },
   MANAGER: { username: "manager1", label: "Manager" },
   ADMIN: { username: "admin1", label: "Admin" },
 };
@@ -42,6 +43,7 @@ export default function LoginPage() {
       setStatus("Signed in");
       if (role === "ADMIN") navigate("/admin-settings");
       else if (role === "MANAGER") navigate("/manager");
+      else if (role === "SALES_REP") navigate("/sales");
       else navigate("/mr");
     } catch {
       setStatus("Login failed");
@@ -95,7 +97,7 @@ export default function LoginPage() {
           <p className="muted">Sign in to your account to continue</p>
 
           <div className="auth-role-tabs" role="tablist" aria-label="Account roles">
-            {(["MR", "MANAGER", "ADMIN"] as AccountRole[]).map((role) => (
+            {(["MR", "SALES_REP", "MANAGER", "ADMIN"] as AccountRole[]).map((role) => (
               <button
                 key={role}
                 type="button"
@@ -143,7 +145,7 @@ export default function LoginPage() {
 
           {status && <p className="auth-status">{status}</p>}
 
-          <p className="auth-footnote">Demo accounts: mr1, manager1, admin1 (password: password)</p>
+          <p className="auth-footnote">Demo accounts: mr1, sales1, manager1, admin1 (password: password)</p>
           <p className="auth-copyright">© {currentYear} PharmaNext NBA Platform</p>
         </div>
       </section>

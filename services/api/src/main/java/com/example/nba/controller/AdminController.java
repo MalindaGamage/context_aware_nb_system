@@ -2,11 +2,13 @@ package com.example.nba.controller;
 
 import com.example.nba.dto.AuditLogResponse;
 import com.example.nba.dto.CreateScoringConfigRequest;
+import com.example.nba.dto.EvaluationSummaryResponse;
 import com.example.nba.dto.PageResponse;
 import com.example.nba.dto.ProductSummaryResponse;
 import com.example.nba.dto.RecommendationLogResponse;
 import com.example.nba.dto.ScoringConfigResponse;
 import com.example.nba.service.AuditQueryService;
+import com.example.nba.service.EvaluationService;
 import com.example.nba.service.ProductService;
 import com.example.nba.service.RecommendationLogService;
 import com.example.nba.service.ScoringConfigService;
@@ -31,15 +33,18 @@ public class AdminController {
   private final AuditQueryService auditQueryService;
   private final RecommendationLogService recommendationLogService;
   private final ProductService productService;
+  private final EvaluationService evaluationService;
 
   public AdminController(ScoringConfigService scoringConfigService,
                          AuditQueryService auditQueryService,
                          RecommendationLogService recommendationLogService,
-                         ProductService productService) {
+                         ProductService productService,
+                         EvaluationService evaluationService) {
     this.scoringConfigService = scoringConfigService;
     this.auditQueryService = auditQueryService;
     this.recommendationLogService = recommendationLogService;
     this.productService = productService;
+    this.evaluationService = evaluationService;
   }
 
   @PreAuthorize("hasAuthority('ROLE_ADMIN')")
@@ -93,9 +98,20 @@ public class AdminController {
     return recommendationLogService.list(userId, doctorId, page, size);
   }
 
-  @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
   @GetMapping("/api/v1/admin/products")
   public List<ProductSummaryResponse> products() {
     return productService.listProducts();
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @GetMapping("/api/v1/admin/evaluation-summary")
+  public EvaluationSummaryResponse evaluationSummary(
+      @RequestParam(required = false) UUID userId,
+      @RequestParam(required = false) UUID doctorId,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+  ) {
+    return evaluationService.summarize(userId, doctorId, from, to);
   }
 }

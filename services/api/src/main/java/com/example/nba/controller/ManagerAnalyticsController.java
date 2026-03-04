@@ -26,9 +26,10 @@ public class ManagerAnalyticsController {
       @RequestParam(required = false) UUID mrId,
       @RequestParam(required = false) UUID territoryId,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart
   ) {
-    return managerAnalyticsService.getDashboard(mrId, territoryId, from, to);
+    return managerAnalyticsService.getDashboard(mrId, territoryId, from, to, weekStart);
   }
 
   @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")

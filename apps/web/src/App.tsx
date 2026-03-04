@@ -4,6 +4,7 @@ import RequireAuth from "./auth/RequireAuth";
 import AppShell from "./layout/AppShell";
 import LoginPage from "./pages/LoginPage";
 import NbaDashboardPage from "./pages/NbaDashboardPage";
+import SalesRepDashboard from "./pages/SalesRepDashboard";
 import DoctorDirectoryPage from "./pages/DoctorDirectoryPage";
 import VisitLogPage from "./pages/VisitLogPage";
 import ManagerDashboard from "./pages/ManagerDashboard";
@@ -23,6 +24,16 @@ export default function App() {
               <RequireAuth roles={["MR", "MANAGER", "ADMIN"]}>
                 <AppShell>
                   <NbaDashboardPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/sales"
+            element={
+              <RequireAuth roles={["SALES_REP", "MANAGER", "ADMIN"]}>
+                <AppShell>
+                  <SalesRepDashboard />
                 </AppShell>
               </RequireAuth>
             }
@@ -78,6 +89,7 @@ export default function App() {
             }
           />
           <Route path="/manager/territories" element={<Navigate to="/territories" replace />} />
+          <Route path="/sr" element={<Navigate to="/sales" replace />} />
           <Route path="/admin" element={<Navigate to="/admin-settings" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
