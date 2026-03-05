@@ -49,11 +49,11 @@ public class AuditQueryService {
         .addValue("offset", offset);
 
     String baseWhere = """
-        WHERE (:actorUserId IS NULL OR actor_user_id = :actorUserId)
-          AND (:action IS NULL OR action = :action)
-          AND (:entityType IS NULL OR entity_type = :entityType)
-          AND (:fromTs IS NULL OR created_at >= :fromTs)
-          AND (:toTs IS NULL OR created_at < :toTs)
+        WHERE (CAST(:actorUserId AS uuid) IS NULL OR actor_user_id = CAST(:actorUserId AS uuid))
+          AND (CAST(:action AS text) IS NULL OR action = CAST(:action AS text))
+          AND (CAST(:entityType AS text) IS NULL OR entity_type = CAST(:entityType AS text))
+          AND (CAST(:fromTs AS timestamptz) IS NULL OR created_at >= CAST(:fromTs AS timestamptz))
+          AND (CAST(:toTs AS timestamptz) IS NULL OR created_at < CAST(:toTs AS timestamptz))
         """;
 
     long total = jdbc.queryForObject(

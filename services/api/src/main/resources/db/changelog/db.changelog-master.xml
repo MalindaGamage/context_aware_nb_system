@@ -68,4 +68,8 @@
     <changeSet id="016-recommendation-pharmacy-target" author="codex">
         <sqlFile path="db/changelog/016_recommendation_pharmacy_target.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="017-backfill-user-product-assignments" author="codex">
+        <sqlFile path="db/changelog/017_backfill_user_product_assignments.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>
