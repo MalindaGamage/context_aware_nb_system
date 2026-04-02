@@ -23,9 +23,27 @@ function getWhatsappNumber(doctor: Doctor) {
     doctor.whatsapp_number ??
     doctor.phoneNumber ??
     doctor.phone ??
+    ("contactNumber" in doctor ? doctor.contactNumber : null) ??
     doctor.mobile ??
     null;
-  return value?.trim() || null;
+  if (typeof value !== "string") return null;
+  return value.trim() || null;
+}
+
+function formatPhoneNumber(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const digits = trimmed.replace(/[^\d+]/g, "");
+  if (digits.startsWith("+94") && digits.length === 12) {
+    return `${digits.slice(0, 3)} ${digits.slice(3, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
+  }
+  if (digits.startsWith("94") && digits.length === 11) {
+    return `+${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 10 && digits.startsWith("0")) {
+    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  return trimmed;
 }
 
 function getEmailAddress(doctor: Doctor) {
@@ -524,6 +542,7 @@ export default function DoctorDirectoryPage() {
             ) : null}
             {doctors.map((doctor) => {
               const whatsappNumber = getWhatsappNumber(doctor);
+              const formattedWhatsappNumber = formatPhoneNumber(whatsappNumber);
               const emailAddress = getEmailAddress(doctor);
 
               return (
@@ -542,12 +561,12 @@ export default function DoctorDirectoryPage() {
                     <div className="muted">{doctor.availabilityPattern || doctor.schedulingNotes || "No schedule details"}</div>
                   </td>
                   <td>{formatGeoPoint(doctor)}</td>
-                  <td>
+                  <td className="pn-contact-cell">
                     <div className="pn-contact-links">
                       <ContactLink
                         href={whatsappNumber ? toWhatsappUrl(whatsappNumber) : null}
                         label="WhatsApp"
-                        value={whatsappNumber}
+                        value={formattedWhatsappNumber}
                         title="Open WhatsApp chat"
                         icon={<WhatsAppIcon />}
                       />

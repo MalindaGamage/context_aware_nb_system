@@ -549,6 +549,49 @@ const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL ?? "/kc";
 const realm = import.meta.env.VITE_KEYCLOAK_REALM ?? "nba";
 const clientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? "nba-api";
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly operation: string;
+
+  constructor(message: string, status: number, operation = "") {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.operation = operation;
+  }
+}
+
+export function isUnauthorizedError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401;
+}
+
+type SessionExpiredListener = () => void;
+
+let sessionExpiredListener: SessionExpiredListener | null = null;
+let sessionExpiredNotified = false;
+
+export function onSessionExpired(listener: SessionExpiredListener | null) {
+  sessionExpiredListener = listener;
+}
+
+export function resetSessionExpiredState() {
+  sessionExpiredNotified = false;
+}
+
+function ensureAuthorizedResponse(response: Response, operation: string) {
+  if (response.status === 401) {
+    if (!sessionExpiredNotified) {
+      sessionExpiredNotified = true;
+      sessionExpiredListener?.();
+    }
+    throw new ApiError("Session expired", response.status, operation);
+  }
+
+  if (!response.ok) {
+    throw new Error(operation);
+  }
+}
+
 function authHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
@@ -614,7 +657,7 @@ export async function fetchDoctors(
   const res = await fetch(`${apiBase}/doctors?${search.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load doctors");
+  ensureAuthorizedResponse(res, "Failed to load doctors");
   return (await res.json()) as PageResponse<Doctor>;
 }
 
@@ -629,7 +672,7 @@ export async function fetchPharmacies(
   const res = await fetch(`${apiBase}/pharmacies?${search.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load pharmacies");
+  ensureAuthorizedResponse(res, "Failed to load pharmacies");
   return (await res.json()) as PageResponse<Pharmacy>;
 }
 
@@ -647,7 +690,7 @@ export async function fetchNearbyPharmacies(token: string, lat: number, lon: num
   const res = await fetch(`${apiBase}/pharmacies/nearby?lat=${lat}&lon=${lon}&radiusKm=${radiusKm}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load pharmacies");
+  ensureAuthorizedResponse(res, "Failed to load pharmacies");
   return (await res.json()) as Pharmacy[];
 }
 
@@ -655,7 +698,7 @@ export async function fetchNearbyDoctors(token: string, lat: number, lon: number
   const res = await fetch(`${apiBase}/doctors/nearby?lat=${lat}&lon=${lon}&radiusKm=${radiusKm}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load doctors");
+  ensureAuthorizedResponse(res, "Failed to load doctors");
   return (await res.json()) as Doctor[];
 }
 
@@ -699,7 +742,7 @@ export async function fetchMyTerritories(token: string) {
   const res = await fetch(`${apiBase}/users/me/territories`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load territories");
+  ensureAuthorizedResponse(res, "Failed to load territories");
   return (await res.json()) as Territory[];
 }
 
@@ -707,7 +750,7 @@ export async function fetchMySchedulePreference(token: string) {
   const res = await fetch(`${apiBase}/users/me/schedule`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load schedule preference");
+  ensureAuthorizedResponse(res, "Failed to load schedule preference");
   return (await res.json()) as UserSchedulePreference;
 }
 
@@ -901,7 +944,7 @@ export async function fetchMyVisits(token: string, page = 0, size = 20) {
   const res = await fetch(`${apiBase}/visits?page=${page}&size=${size}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load visits");
+  ensureAuthorizedResponse(res, "Failed to load visits");
   return (await res.json()) as PageResponse<Visit>;
 }
 
@@ -919,7 +962,7 @@ export async function fetchNbaNext(token: string, limit = 5) {
   const res = await fetch(`${apiBase}/nba/next?limit=${limit}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load recommendations");
+  ensureAuthorizedResponse(res, "Failed to load recommendations");
   return (await res.json()) as NbaNextResponse;
 }
 
@@ -1075,7 +1118,7 @@ export async function fetchMyAssignedProducts(token: string) {
   const res = await fetch(`${apiBase}/users/me/products`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Failed to load assigned products");
+  ensureAuthorizedResponse(res, "Failed to load assigned products");
   return (await res.json()) as UserProductAssignment[];
 }
 

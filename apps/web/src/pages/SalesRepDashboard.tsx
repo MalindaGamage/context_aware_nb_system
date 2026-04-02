@@ -92,7 +92,7 @@ export default function SalesRepDashboard() {
   if (!token) return null;
 
   return (
-    <div className="pn-page">
+    <div className="pn-page sales-page">
       <div className="pn-header">
         <div>
           <h1>Sales Rep Dashboard</h1>
@@ -100,15 +100,15 @@ export default function SalesRepDashboard() {
         </div>
       </div>
 
-      <div className="pn-kpi-grid">
+      <div className="pn-kpi-grid sales-kpi-grid">
         <Card><div className="pn-kpi"><span>Assigned Products</span><strong>{products.length}</strong><em>current portfolio</em></div></Card>
         <Card><div className="pn-kpi"><span>Target Territory</span><strong>{territoryName}</strong><em>active region</em></div></Card>
         <Card><div className="pn-kpi"><span>Available Pharmacies</span><strong>{pharmacies.length}</strong><em>in territory</em></div></Card>
         <Card><div className="pn-kpi"><span>Draft Order Value</span><strong>{totalAmount.toFixed(2)}</strong><em>{totalQuantity} units</em></div></Card>
       </div>
 
-      <div className="pn-manager-grid">
-        <Card>
+      <div className="pn-manager-grid sales-workspace-grid">
+        <Card className="sales-brands-card">
           <div className="pn-section-head">
             <h2>Assigned Brands</h2>
             <Pill>{products.length} products</Pill>
@@ -130,7 +130,7 @@ export default function SalesRepDashboard() {
           </div>
         </Card>
 
-        <Card>
+        <Card className="sales-order-card">
           <div className="pn-section-head">
             <h2>Capture Pharmacy Order</h2>
             <Pill>Real-time entry</Pill>

@@ -1,7 +1,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  resetSessionExpiredState,
   capturePharmacyFeedback,
+  isUnauthorizedError,
   fetchDoctors,
+  onSessionExpired,
   fetchMyAssignedProducts,
   fetchMySchedulePreference,
   fetchMyTerritories,
@@ -199,7 +202,7 @@ function buildScheduleRequest(draft: ScheduleDraft): UpdateUserSchedulePreferenc
 }
 
 export default function NbaDashboardPage() {
-  const { token, username } = useAuth();
+  const { token, username, logout } = useAuth();
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [pharmacies, setPharmacies] = useState<MapDestination[]>([]);
@@ -232,6 +235,7 @@ export default function NbaDashboardPage() {
   const [syncStrategy, setSyncStrategy] = useState<SyncConflictStrategy>("SERVER_WINS");
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [status, setStatus] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [queuedVisits, setQueuedVisits] = useState(0);
   const [queuedFeedback, setQueuedFeedback] = useState(0);
   const [feedbackComposer, setFeedbackComposer] = useState<FeedbackComposer | null>(null);
@@ -288,7 +292,8 @@ export default function NbaDashboardPage() {
       setSchedulePreference(schedule);
       setScheduleDraft(scheduleToDraft(schedule));
       setCoverageScore(Math.min(100, Math.round((visitsPage.meta.totalElements / Math.max(1, doctorPage.meta.totalElements)) * 100)));
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) return;
       setStatus("Failed to load dashboard summary");
     }
   };
@@ -306,7 +311,8 @@ export default function NbaDashboardPage() {
       const result = await fetchNbaNext(authToken, 8);
       setRecommendations(result.recommendations);
       await cacheNbaSnapshot(result.recommendations);
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) return;
       const cached = await getCachedNbaSnapshot();
       if (cached) {
         setRecommendations(cached.recommendations);
@@ -323,6 +329,16 @@ export default function NbaDashboardPage() {
     setQueuedFeedback(breakdown.feedback);
     setConflicts(pendingConflicts);
   };
+
+  useEffect(() => {
+    const listener = () => {
+      setSessionExpired(true);
+      setStatus("Session expired. Please re-login to continue.");
+      logout();
+    };
+    onSessionExpired(listener);
+    return () => onSessionExpired(null);
+  }, [logout]);
 
   const destinations = useMemo(() => {
     const doctorDestinations = doctors
@@ -488,6 +504,8 @@ export default function NbaDashboardPage() {
 
   useEffect(() => {
     if (!token) return;
+    resetSessionExpiredState();
+    setSessionExpired(false);
     void load(token);
     void loadRecommendations(token);
     void refreshOffline();
@@ -1746,6 +1764,20 @@ export default function NbaDashboardPage() {
       )}
 
       {status && <div className="toast">{status}</div>}
+      {sessionExpired && (
+        <div className="toast">
+          Session expired. Click below to re-login and continue.
+          <div className="row-actions" style={{ marginTop: 8 }}>
+            <Button
+              onClick={() => {
+                window.location.href = "/login";
+              }}
+            >
+              Re-login
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
