@@ -26,6 +26,7 @@ import {
   type UserSchedulePreference,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { greetingLine, territoryZoneLabel } from "../lib/greeting";
 import { getGoogleMapsApiKey, loadGoogleMaps } from "../lib/googleMaps";
 import {
   cacheNbaSnapshot,
@@ -255,6 +256,7 @@ export default function NbaDashboardPage() {
   const [mapError, setMapError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchAnchor, setSearchAnchor] = useState<LatLngLiteral | null>(null);
+  const [now, setNow] = useState(() => new Date());
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const mapsRef = useRef<any>(null);
@@ -271,6 +273,11 @@ export default function NbaDashboardPage() {
     if (!normalized) return "User";
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
   }, [username]);
+
+  const locationZone = useMemo(
+    () => territoryZoneLabel(territories.map((territory) => territory.name)),
+    [territories]
+  );
 
   const load = async (authToken: string) => {
     try {
@@ -339,6 +346,11 @@ export default function NbaDashboardPage() {
     onSessionExpired(listener);
     return () => onSessionExpired(null);
   }, [logout]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const destinations = useMemo(() => {
     const doctorDestinations = doctors
@@ -1174,15 +1186,15 @@ export default function NbaDashboardPage() {
     <div className="pn-page">
       <div className="pn-header">
         <div>
-          <h1>Good Morning, {greetingName}</h1>
+          <h1>{greetingLine(greetingName, now)}</h1>
           <p>
             Here are your next best actions for today
-            {territories[0] ? ` - ${territories[0].name} Territory` : ""}
+            {` - ${locationZone}`}
           </p>
         </div>
         <div className="pn-header-meta">
-          <span>{territories[0]?.name ?? "Unassigned"}</span>
-          <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          <span>{locationZone}</span>
+          <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
         </div>
       </div>
 

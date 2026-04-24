@@ -22,6 +22,7 @@ import {
   type UserSummary,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { greetingLine, territoryZoneLabel } from "../lib/greeting";
 import { loadGoogleMaps } from "../lib/googleMaps";
 import { Button, Card, Field, Pill, SectionTitle } from "../ui/components";
 
@@ -70,7 +71,7 @@ export default function ManagerDashboard() {
     phoneNumber?: string;
   };
 
-  const { token } = useAuth();
+  const { token, username } = useAuth();
   const [analytics, setAnalytics] = useState<ManagerAnalyticsResponse>(defaultAnalytics);
   const [overview, setOverview] = useState<TerritoryOverview[]>([]);
   const [mrs, setMrs] = useState<UserSummary[]>([]);
@@ -101,6 +102,7 @@ export default function ManagerDashboard() {
   const [selectedPharmacyTerritoryId, setSelectedPharmacyTerritoryId] = useState("");
   const [pharmacySearchStatus, setPharmacySearchStatus] = useState("");
   const [status, setStatus] = useState("");
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     if (!token) return;
@@ -118,6 +120,11 @@ export default function ManagerDashboard() {
       if (rows[0]) setTargetSalesRepId((current) => current || rows[0].id);
     }).catch(() => setSalesReps([]));
   }, [token]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -288,14 +295,36 @@ export default function ManagerDashboard() {
     Math.round(totalVisitsMtd * 0.31),
   ];
 
+  const greetingName = useMemo(() => {
+    const normalized = username.replace(/[0-9]/g, "").trim();
+    if (!normalized) return "Manager";
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }, [username]);
+
+  const selectedMr = useMemo(
+    () => mrs.find((mr) => mr.id === mrId) ?? null,
+    [mrId, mrs]
+  );
+
+  const locationZone = useMemo(() => {
+    if (selectedMr) {
+      return territoryZoneLabel(selectedMr.territories.map((territory) => territory.name));
+    }
+    return territoryZoneLabel(territories.map((territory) => territory.name));
+  }, [selectedMr, territories]);
+
   if (!token) return null;
 
   return (
     <div className="pn-page">
       <div className="pn-header">
         <div>
-          <h1>Manager Dashboard</h1>
-          <p>Territory coverage analytics and coaching insights</p>
+          <h1>{greetingLine(greetingName, now)}</h1>
+          <p>Territory coverage analytics and coaching insights - {locationZone}</p>
+        </div>
+        <div className="pn-header-meta">
+          <span>{selectedMr ? selectedMr.fullName : "All MRs"}</span>
+          <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
         </div>
       </div>
 
