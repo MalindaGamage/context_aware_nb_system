@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { registerUser, type RegisterUserRequest } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
 type AccountRole = "MR" | "SALES_REP" | "MANAGER" | "ADMIN";
+type AuthMode = "signin" | "register";
 
 const ROLE_PRESETS: Record<AccountRole, { username: string; label: string }> = {
   MR: { username: "mr1", label: "Med Rep" },
@@ -14,7 +16,10 @@ const ROLE_PRESETS: Record<AccountRole, { username: string; label: string }> = {
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [mode, setMode] = useState<AuthMode>("signin");
   const [selectedRole, setSelectedRole] = useState<AccountRole>("MR");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
   const [username, setUsername] = useState(ROLE_PRESETS.MR.username);
   const [password, setPassword] = useState("password");
   const [showPassword, setShowPassword] = useState(false);
@@ -25,9 +30,18 @@ export default function LoginPage() {
 
   const applyPreset = (role: AccountRole) => {
     setSelectedRole(role);
-    setUsername(ROLE_PRESETS[role].username);
-    setPassword("password");
+    if (mode === "signin") {
+      setUsername(ROLE_PRESETS[role].username);
+      setPassword("password");
+    }
     setStatus("");
+  };
+
+  const routeForRole = (role: string | null) => {
+    if (role === "ADMIN") return "/admin-settings";
+    if (role === "MANAGER") return "/manager";
+    if (role === "SALES_REP") return "/sales";
+    return "/mr";
   };
 
   const onLogin = async () => {
@@ -41,15 +55,59 @@ export default function LoginPage() {
     try {
       const role = await login(username, password);
       setStatus("Signed in");
-      if (role === "ADMIN") navigate("/admin-settings");
-      else if (role === "MANAGER") navigate("/manager");
-      else if (role === "SALES_REP") navigate("/sales");
-      else navigate("/mr");
+      navigate(routeForRole(role));
     } catch {
       setStatus("Login failed");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const onRegister = async () => {
+    const normalizedRole = selectedRole === "ADMIN" ? "MR" : selectedRole;
+    if (!fullName.trim() || !email.trim() || !username.trim() || !password.trim()) {
+      setStatus("Complete all registration fields");
+      return;
+    }
+    if (password.length < 8) {
+      setStatus("Password must be at least 8 characters");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setStatus("Creating account...");
+    try {
+      await registerUser({
+        fullName,
+        email,
+        username,
+        password,
+        role: normalizedRole as RegisterUserRequest["role"],
+      });
+      const role = await login(username, password);
+      setStatus("Account created");
+      navigate(routeForRole(role));
+    } catch {
+      setStatus("Registration failed. Try a different username or email.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const switchMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setStatus("");
+    if (nextMode === "register") {
+      setSelectedRole((role) => (role === "ADMIN" ? "MR" : role));
+      setPassword("");
+      if (username === "mr1" || username === "sales1" || username === "manager1" || username === "admin1") {
+        setUsername("");
+      }
+      return;
+    }
+    setSelectedRole("MR");
+    setUsername(ROLE_PRESETS.MR.username);
+    setPassword("password");
   };
 
   return (
@@ -93,11 +151,33 @@ export default function LoginPage() {
 
       <section className="auth-form-panel">
         <div className="auth-form-wrap">
-          <h2>Welcome back</h2>
-          <p className="muted">Sign in to your account to continue</p>
+          <h2>{mode === "signin" ? "Welcome back" : "Create account"}</h2>
+          <p className="muted">
+            {mode === "signin" ? "Sign in to your account to continue" : "Register a field account to continue"}
+          </p>
+
+          <div className="auth-role-tabs" role="tablist" aria-label="Authentication mode">
+            <button
+              type="button"
+              className={`auth-role-tab ${mode === "signin" ? "active" : ""}`}
+              onClick={() => switchMode("signin")}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              className={`auth-role-tab ${mode === "register" ? "active" : ""}`}
+              onClick={() => switchMode("register")}
+            >
+              Register
+            </button>
+          </div>
 
           <div className="auth-role-tabs" role="tablist" aria-label="Account roles">
-            {(["MR", "SALES_REP", "MANAGER", "ADMIN"] as AccountRole[]).map((role) => (
+            {(mode === "signin"
+              ? (["MR", "SALES_REP", "MANAGER", "ADMIN"] as AccountRole[])
+              : (["MR", "SALES_REP", "MANAGER"] as AccountRole[])
+            ).map((role) => (
               <button
                 key={role}
                 type="button"
@@ -108,6 +188,31 @@ export default function LoginPage() {
               </button>
             ))}
           </div>
+
+          {mode === "register" && (
+            <>
+              <label className="auth-field">
+                <span>Full Name</span>
+                <input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your full name"
+                  autoComplete="name"
+                />
+              </label>
+
+              <label className="auth-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@pharma.com"
+                  autoComplete="email"
+                />
+              </label>
+            </>
+          )}
 
           <label className="auth-field">
             <span>Username</span>
@@ -126,8 +231,8 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="password"
-                autoComplete="current-password"
+                placeholder={mode === "signin" ? "password" : "At least 8 characters"}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
               />
               <button
                 type="button"
@@ -139,13 +244,24 @@ export default function LoginPage() {
             </div>
           </label>
 
-          <button type="button" className="auth-submit" onClick={onLogin} disabled={isSubmitting}>
-            {isSubmitting ? "Signing in..." : "Sign In"}
+          <button
+            type="button"
+            className="auth-submit"
+            onClick={mode === "signin" ? onLogin : onRegister}
+            disabled={isSubmitting}
+          >
+            {isSubmitting
+              ? mode === "signin" ? "Signing in..." : "Creating account..."
+              : mode === "signin" ? "Sign In" : "Create Account"}
           </button>
 
           {status && <p className="auth-status">{status}</p>}
 
-          <p className="auth-footnote">Demo accounts: mr1, sales1, manager1, admin1 (password: password)</p>
+          <p className="auth-footnote">
+            {mode === "signin"
+              ? "Demo accounts: mr1, sales1, manager1, admin1 (password: password)"
+              : "Admin accounts are created by an existing administrator."}
+          </p>
           <p className="auth-copyright">© {currentYear} PharmaNext NBA Platform</p>
         </div>
       </section>

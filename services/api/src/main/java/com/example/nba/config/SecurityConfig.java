@@ -42,7 +42,7 @@ public class SecurityConfig {
       .authorizeHttpRequests(auth -> auth
         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
-        .requestMatchers("/api/v1/auth/login").permitAll()
+        .requestMatchers("/api/v1/auth/login", "/api/v1/auth/register").permitAll()
         .anyRequest().authenticated()
       )
       .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthConverter())));

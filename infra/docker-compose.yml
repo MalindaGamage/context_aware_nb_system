@@ -38,6 +38,9 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-nbapass}
       JWT_ISSUER_URI: http://host.docker.internal:8081/realms/nba
       SECURITY_JWT_JWK_SET_URI: http://keycloak:8080/realms/nba/protocol/openid-connect/certs
+      KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080
+      KEYCLOAK_ADMIN_USERNAME: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
       RECOMMENDER_BASE_URL: http://recommender:8000
       RECOMMENDER_TIMEOUT_MS: 1800
     ports:

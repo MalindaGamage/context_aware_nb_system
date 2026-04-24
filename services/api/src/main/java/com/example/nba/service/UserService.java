@@ -111,7 +111,16 @@ public class UserService {
 
   @Transactional
   public UserProfileResponse createUser(CreateUserRequest request, String roleName) {
-    userRepository.findByEmail(request.email().trim())
+    return createUser(UUID.randomUUID(), request.fullName(), request.email(), roleName);
+  }
+
+  @Transactional
+  public UserProfileResponse createRegisteredUser(UUID userId, String fullName, String email, String roleName) {
+    return createUser(userId, fullName, email, roleName);
+  }
+
+  private UserProfileResponse createUser(UUID userId, String fullName, String email, String roleName) {
+    userRepository.findByEmail(email.trim().toLowerCase())
         .ifPresent(existing -> {
           throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already exists");
         });
@@ -121,9 +130,9 @@ public class UserService {
 
     OffsetDateTime now = OffsetDateTime.now();
     User user = new User();
-    user.setId(UUID.randomUUID());
-    user.setFullName(request.fullName().trim());
-    user.setEmail(request.email().trim().toLowerCase());
+    user.setId(userId);
+    user.setFullName(fullName.trim());
+    user.setEmail(email.trim().toLowerCase());
     user.setActive(true);
     user.setCreatedAt(now);
     user.setUpdatedAt(now);

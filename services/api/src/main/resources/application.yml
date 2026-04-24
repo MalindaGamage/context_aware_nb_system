@@ -27,3 +27,10 @@ server:
 recommender:
   base-url: ${RECOMMENDER_BASE_URL:http://localhost:8000}
   timeout-ms: ${RECOMMENDER_TIMEOUT_MS:1800}
+
+keycloak:
+  realm: ${KEYCLOAK_REALM:nba}
+  admin:
+    base-url: ${KEYCLOAK_ADMIN_BASE_URL:http://localhost:8081}
+    username: ${KEYCLOAK_ADMIN_USERNAME:admin}
+    password: ${KEYCLOAK_ADMIN_PASSWORD:admin}

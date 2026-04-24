@@ -199,6 +199,22 @@ export type CreateUserRequest = {
   email: string;
 };
 
+export type RegisterUserRequest = {
+  fullName: string;
+  email: string;
+  username: string;
+  password: string;
+  role: "MR" | "SALES_REP" | "MANAGER";
+};
+
+export type RegisterUserResponse = {
+  userId: string;
+  username: string;
+  email: string;
+  fullName: string;
+  role: "MR" | "SALES_REP" | "MANAGER";
+};
+
 export type UpdateUserRequest = {
   fullName: string;
   email: string;
@@ -632,6 +648,20 @@ export async function login(username: string, password: string) {
 
   const data = await res.json();
   return { ...data, realm_role: decodePrimaryRole(data.access_token) };
+}
+
+export async function registerUser(request: RegisterUserRequest) {
+  const res = await fetch(`${apiBase}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    throw new Error("Registration failed");
+  }
+
+  return (await res.json()) as RegisterUserResponse;
 }
 
 export async function fetchDoctors(
