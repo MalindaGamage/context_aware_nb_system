@@ -586,6 +586,13 @@ type SessionExpiredListener = () => void;
 let sessionExpiredListener: SessionExpiredListener | null = null;
 let sessionExpiredNotified = false;
 
+function notifySessionExpired() {
+  if (!sessionExpiredNotified) {
+    sessionExpiredNotified = true;
+    sessionExpiredListener?.();
+  }
+}
+
 export function onSessionExpired(listener: SessionExpiredListener | null) {
   sessionExpiredListener = listener;
 }
@@ -596,10 +603,7 @@ export function resetSessionExpiredState() {
 
 function ensureAuthorizedResponse(response: Response, operation: string) {
   if (response.status === 401) {
-    if (!sessionExpiredNotified) {
-      sessionExpiredNotified = true;
-      sessionExpiredListener?.();
-    }
+    notifySessionExpired();
     throw new ApiError("Session expired", response.status, operation);
   }
 
@@ -609,23 +613,41 @@ function ensureAuthorizedResponse(response: Response, operation: string) {
 }
 
 function authHeaders(token: string) {
+  if (isAccessTokenExpired(token)) {
+    notifySessionExpired();
+    throw new ApiError("Session expired", 401, "Authorization");
+  }
+
   return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
   };
 }
 
-function decodePrimaryRole(accessToken: string): string {
+function decodeJwtPayload(accessToken: string): Record<string, unknown> | null {
   try {
     const encodedPayload = accessToken.split(".")[1] ?? "";
     const base64 = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-    const payload = JSON.parse(atob(padded));
-    const roles: string[] = payload?.realm_access?.roles ?? [];
-    return roles.find((role) => ["ADMIN", "MANAGER", "MR", "SALES_REP"].includes(role)) ?? roles[0] ?? "";
+    return JSON.parse(atob(padded));
   } catch {
-    return "";
+    return null;
   }
+}
+
+export function isAccessTokenExpired(accessToken: string, clockSkewSeconds = 30): boolean {
+  const payload = decodeJwtPayload(accessToken);
+  const exp = payload?.exp;
+  if (typeof exp !== "number") return true;
+  return exp <= Math.floor(Date.now() / 1000) + clockSkewSeconds;
+}
+
+function decodePrimaryRole(accessToken: string): string {
+  const payload = decodeJwtPayload(accessToken);
+  const roles = payload?.realm_access;
+  const realmRoles = roles && typeof roles === "object" && "roles" in roles ? roles.roles : [];
+  const roleList = Array.isArray(realmRoles) ? realmRoles.filter((role): role is string => typeof role === "string") : [];
+  return roleList.find((role) => ["ADMIN", "MANAGER", "MR", "SALES_REP"].includes(role)) ?? roleList[0] ?? "";
 }
 
 export async function login(username: string, password: string) {

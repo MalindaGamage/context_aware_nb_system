@@ -1,26 +1,42 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchMrSummaries, fetchTerritoryOverview, type TerritoryOverview, type UserSummary } from "../api";
+import {
+  assignTerritoryToMr,
+  createTerritory,
+  fetchMrSummaries,
+  fetchTerritoryOverview,
+  type CreateTerritoryRequest,
+  type TerritoryOverview,
+  type UserSummary,
+} from "../api";
 import { useAuth } from "../auth/AuthContext";
-import { Button, Card, Pill } from "../ui/components";
+import { Button, Card, Field, Pill } from "../ui/components";
+
+const emptyTerritoryForm: CreateTerritoryRequest = { name: "", code: "" };
 
 export default function TerritoriesPage() {
   const { token } = useAuth();
   const [rows, setRows] = useState<TerritoryOverview[]>([]);
   const [mrs, setMrs] = useState<UserSummary[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [territoryForm, setTerritoryForm] = useState<CreateTerritoryRequest>(emptyTerritoryForm);
+  const [assignSelection, setAssignSelection] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
 
-  useEffect(() => {
+  const loadData = async () => {
     if (!token) return;
-    Promise.all([fetchTerritoryOverview(token, {}), fetchMrSummaries(token)])
-      .then(([overview, users]) => {
-        setRows(overview);
-        setMrs(users);
-      })
-      .catch(() => {
-        setRows([]);
-        setMrs([]);
-        setStatus("Failed to load territory data");
-      });
+    try {
+      const [overview, users] = await Promise.all([fetchTerritoryOverview(token, {}), fetchMrSummaries(token)]);
+      setRows(overview);
+      setMrs(users);
+    } catch {
+      setRows([]);
+      setMrs([]);
+      setStatus("Failed to load territory data");
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
   }, [token]);
 
   const mrByTerritory = useMemo(() => {
@@ -37,6 +53,44 @@ export default function TerritoriesPage() {
 
   if (!token) return null;
 
+  const saveTerritory = async () => {
+    const request = {
+      name: territoryForm.name.trim(),
+      code: territoryForm.code.trim().toUpperCase(),
+    };
+    if (!request.name || !request.code) {
+      setStatus("Enter territory name and code");
+      return;
+    }
+
+    try {
+      await createTerritory(token, request);
+      setTerritoryForm(emptyTerritoryForm);
+      setShowCreateForm(false);
+      setStatus("Territory created");
+      await loadData();
+    } catch {
+      setStatus("Failed to create territory");
+    }
+  };
+
+  const assignMr = async (territoryId: string) => {
+    const mrId = assignSelection[territoryId];
+    if (!mrId) {
+      setStatus("Select an MR to assign");
+      return;
+    }
+
+    try {
+      await assignTerritoryToMr(token, mrId, { territoryId });
+      setAssignSelection((current) => ({ ...current, [territoryId]: "" }));
+      setStatus("MR assigned to territory");
+      await loadData();
+    } catch {
+      setStatus("Failed to assign MR");
+    }
+  };
+
   return (
     <div className="pn-page">
       <div className="pn-header">
@@ -44,8 +98,34 @@ export default function TerritoriesPage() {
           <h1>Territory Management</h1>
           <p>Manage MR assignments and territory boundaries</p>
         </div>
-        <Button>+ Add Territory</Button>
+        <Button onClick={() => setShowCreateForm((visible) => !visible)}>
+          {showCreateForm ? "Cancel" : "+ Add Territory"}
+        </Button>
       </div>
+
+      {showCreateForm && (
+        <Card>
+          <div className="inline-form">
+            <Field label="Name">
+              <input
+                value={territoryForm.name}
+                onChange={(event) => setTerritoryForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Walasmulla Area"
+              />
+            </Field>
+            <Field label="Code">
+              <input
+                value={territoryForm.code}
+                onChange={(event) =>
+                  setTerritoryForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))
+                }
+                placeholder="WAL-A"
+              />
+            </Field>
+            <Button onClick={saveTerritory}>Create</Button>
+          </div>
+        </Card>
+      )}
 
       <div className="pn-territory-grid">
         {rows.map((row) => {
@@ -73,6 +153,22 @@ export default function TerritoriesPage() {
                     <Pill>{rep.territories.length} territories</Pill>
                   </div>
                 ))}
+              </div>
+              <div className="pn-territory-assign">
+                <select
+                  value={assignSelection[row.territoryId] ?? ""}
+                  onChange={(event) =>
+                    setAssignSelection((current) => ({ ...current, [row.territoryId]: event.target.value }))
+                  }
+                >
+                  <option value="">Select MR</option>
+                  {mrs.map((mr) => (
+                    <option key={mr.id} value={mr.id}>
+                      {mr.fullName}
+                    </option>
+                  ))}
+                </select>
+                <Button onClick={() => assignMr(row.territoryId)}>Assign MR</Button>
               </div>
             </Card>
           );

@@ -72,4 +72,8 @@
     <changeSet id="017-backfill-user-product-assignments" author="codex">
         <sqlFile path="db/changelog/017_backfill_user_product_assignments.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="018-walasmulla-demo-data" author="codex">
+        <sqlFile path="db/changelog/018_walasmulla_demo_data.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

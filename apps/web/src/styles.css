@@ -1447,6 +1447,13 @@ button.accent {
   background: #f8fafc;
 }
 
+.pn-territory-assign {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .pn-tabs {
   display: inline-flex;
   gap: 4px;

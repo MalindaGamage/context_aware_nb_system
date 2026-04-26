@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { login as loginRequest } from "../api";
+import { isAccessTokenExpired, login as loginRequest } from "../api";
 
 type AuthState = {
   token: string | null;
@@ -19,9 +19,20 @@ const TOKEN_KEY = "nba_token";
 const ROLE_KEY = "nba_role";
 const USER_KEY = "nba_user";
 
+function readStoredToken() {
+  const storedToken = localStorage.getItem(TOKEN_KEY);
+  if (!storedToken || !isAccessTokenExpired(storedToken)) {
+    return storedToken;
+  }
+
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ROLE_KEY);
+  return null;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(localStorage.getItem(TOKEN_KEY));
-  const [role, setRole] = useState<string | null>(localStorage.getItem(ROLE_KEY));
+  const [token, setToken] = useState<string | null>(readStoredToken);
+  const [role, setRole] = useState<string | null>(() => (token ? localStorage.getItem(ROLE_KEY) : null));
   const [username, setUsername] = useState<string>(localStorage.getItem(USER_KEY) ?? "mr1");
 
   useEffect(() => {
