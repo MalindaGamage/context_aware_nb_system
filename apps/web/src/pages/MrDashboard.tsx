@@ -98,6 +98,16 @@ function DoctorMapView({
   );
 }
 
+function doctorLocationLabel(doctor: Doctor, territoryName?: string) {
+  if (doctor.lat != null && doctor.lon != null) {
+    return `${doctor.lat.toFixed(5)}, ${doctor.lon.toFixed(5)}`;
+  }
+  if (territoryName) {
+    return territoryName;
+  }
+  return "Location not set";
+}
+
 const VISIT_DRAFT_PREFIX = "nba_visit_draft";
 
 function visitDraftKey(username: string, doctorId: string) {
@@ -150,10 +160,14 @@ export default function MrDashboard() {
   }, [token]);
 
   const activeTerritoryId = useMemo(() => {
-    if (territoryId) return territoryId;
-    if (myTerritories.length > 0) return myTerritories[0].id;
-    return "";
-  }, [territoryId, myTerritories]);
+    return territoryId;
+  }, [territoryId]);
+
+  const territoryNameById = useMemo(() => {
+    const mapping = new Map<string, string>();
+    myTerritories.forEach((territory) => mapping.set(territory.id, territory.name));
+    return mapping;
+  }, [myTerritories]);
 
   useEffect(() => {
     if (!token) return;
@@ -179,9 +193,37 @@ export default function MrDashboard() {
     if (!nameSearch.trim()) return segmentedDoctors;
     const q = nameSearch.toLowerCase();
     return segmentedDoctors.filter(
-      (d) => d.fullName.toLowerCase().includes(q) || (d.specialty ?? "").toLowerCase().includes(q)
+      (d) => {
+        const territoryName = d.territoryId ? territoryNameById.get(d.territoryId) : "";
+        return [
+          d.fullName,
+          d.specialty,
+          d.tier,
+          territoryName,
+          d.notes,
+          d.targetProductFocus,
+          d.availabilityPattern,
+          d.availabilityWindow,
+          d.schedulingNotes,
+          d.lat != null && d.lon != null ? `${d.lat},${d.lon}` : "",
+        ].some((value) => (value ?? "").toLowerCase().includes(q));
+      }
     );
-  }, [segmentedDoctors, nameSearch]);
+  }, [segmentedDoctors, nameSearch, territoryNameById]);
+
+  const directoryStats = useMemo(() => {
+    const met = displayedDoctors.filter((doctor) => visitedDoctorIds.has(doctor.id)).length;
+    const mapped = displayedDoctors.filter((doctor) => doctor.lat != null && doctor.lon != null).length;
+    return {
+      met,
+      notMet: displayedDoctors.length - met,
+      mapped,
+    };
+  }, [displayedDoctors, visitedDoctorIds]);
+
+  const selectedLatestVisit = useMemo(() => {
+    return visitHistory[0] ?? null;
+  }, [visitHistory]);
 
   useEffect(() => {
     if (!selectedDoctor) return;
@@ -323,7 +365,20 @@ export default function MrDashboard() {
     }
 
     try {
-      await createVisit(token, payload);
+      const created = await createVisit(token, payload);
+      if (gpsOptIn && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            void captureVisitGps(token, created.id, {
+              lat: position.coords.latitude,
+              lon: position.coords.longitude,
+              optIn: true,
+            }).then(() => refreshSelectedDoctorVisits()).catch(() => undefined);
+          },
+          () => undefined,
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
       localStorage.removeItem(visitDraftKey(username, selectedDoctor.id));
       setOutcome("");
       setNotes("");
@@ -342,6 +397,69 @@ export default function MrDashboard() {
       setVisitTime(new Date().toISOString().slice(0, 16));
       setStatus("Network issue: visit queued for sync");
     }
+  };
+
+  const markSelectedDoctorMet = async () => {
+    if (!token || !selectedDoctor) return;
+    const timestamp = new Date().toISOString();
+    const payload: SyncVisitRequest = {
+      clientReferenceId: crypto.randomUUID(),
+      doctorId: selectedDoctor.id,
+      visitTime: timestamp,
+      outcome: "Met",
+      notes: notes.trim() || "Marked as met from MR Doctor Directory",
+      followUpRequired,
+    };
+
+    if (!navigator.onLine) {
+      await queueVisit(payload);
+      await refreshOfflineState();
+      setVisitedDoctorIds((prev) => {
+        const next = new Set(prev);
+        next.add(selectedDoctor.id);
+        return next;
+      });
+      setNotes("");
+      setStatus("Offline: met status queued for sync");
+      return;
+    }
+
+    try {
+      const created = await createVisit(token, payload);
+      if (gpsOptIn && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            void captureVisitGps(token, created.id, {
+              lat: position.coords.latitude,
+              lon: position.coords.longitude,
+              optIn: true,
+            }).then(() => refreshSelectedDoctorVisits()).catch(() => undefined);
+          },
+          () => undefined,
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
+      setVisitedDoctorIds((prev) => {
+        const next = new Set(prev);
+        next.add(selectedDoctor.id);
+        return next;
+      });
+      setNotes("");
+      setStatus("Doctor marked as met");
+      await refreshSelectedDoctorVisits();
+    } catch {
+      await queueVisit(payload);
+      await refreshOfflineState();
+      setStatus("Network issue: met status queued for sync");
+    }
+  };
+
+  const openSelectedDoctorRoute = () => {
+    if (!selectedDoctor || selectedDoctor.lat == null || selectedDoctor.lon == null) {
+      setStatus("Doctor location is not set");
+      return;
+    }
+    window.open(`https://www.google.com/maps/search/?api=1&query=${selectedDoctor.lat},${selectedDoctor.lon}`, "_blank", "noopener,noreferrer");
   };
 
   const submitFeedback = async (
@@ -685,6 +803,9 @@ export default function MrDashboard() {
         <div className="chips">
           <Pill>Mode: {locationSegment === "NEARBY" ? "Nearby" : "Assigned territory"}</Pill>
           <Pill>Showing: {displayedDoctors.length}</Pill>
+          <Pill>Met: {directoryStats.met}</Pill>
+          <Pill>Not met: {directoryStats.notMet}</Pill>
+          <Pill>Mapped: {directoryStats.mapped}</Pill>
           <button className={`pn-chip-btn${!mapView ? " active" : ""}`} onClick={() => setMapView(false)}>List</button>
           <button className={`pn-chip-btn${mapView ? " active" : ""}`} onClick={() => setMapView(true)}>Map</button>
         </div>
@@ -702,15 +823,26 @@ export default function MrDashboard() {
               <>
                 {displayedDoctors.map((doc) => {
                   const met = visitedDoctorIds.has(doc.id);
+                  const initials = doc.fullName.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
                   return (
-                    <button key={doc.id} className="list-item" onClick={() => setSelectedDoctor(doc)}>
-                      <div>
-                        <strong>{doc.fullName}</strong>
-                        <span>{doc.specialty || "General"}</span>
+                    <button
+                      key={doc.id}
+                      className={`list-item${selectedDoctor?.id === doc.id ? " active" : ""}`}
+                      onClick={() => setSelectedDoctor(doc)}
+                    >
+                      <div className="doc-list-left">
+                        <div className={`doc-avatar${met ? " met" : ""}`}>{initials}</div>
+                        <div>
+                          <strong>{doc.fullName}</strong>
+                          <span>{doc.specialty || "General"}</span>
+                          <span className="doc-location-line">
+                            {doctorLocationLabel(doc, doc.territoryId ? territoryNameById.get(doc.territoryId) : undefined)}
+                          </span>
+                        </div>
                       </div>
                       <div className="list-item-right">
                         <span className={`met-badge ${met ? "met" : "not-met"}`}>{met ? "✓ Met" : "Not Met"}</span>
-                        <Pill>Tier {doc.tier} | P{doc.priorityScore}</Pill>
+                        <Pill>T{doc.tier} · {doc.priorityScore}</Pill>
                       </div>
                     </button>
                   );
@@ -722,8 +854,15 @@ export default function MrDashboard() {
           <div className="detail">
             {selectedDoctor ? (
               <div>
-                <h2>{selectedDoctor.fullName}</h2>
-                <p className="muted">{selectedDoctor.specialty || "General"}</p>
+                <div className="doc-detail-header">
+                  <div className={`doc-detail-avatar${visitedDoctorIds.has(selectedDoctor.id) ? " met" : ""}`}>
+                    {selectedDoctor.fullName.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase()}
+                  </div>
+                  <div>
+                    <h2>{selectedDoctor.fullName}</h2>
+                    <p className="muted">{selectedDoctor.specialty || "General"}</p>
+                  </div>
+                </div>
                 <div className="detail-grid">
                   <div>
                     <span>Tier</span>
@@ -739,8 +878,29 @@ export default function MrDashboard() {
                       {visitedDoctorIds.has(selectedDoctor.id) ? "Met ✓" : "Not Met"}
                     </strong>
                   </div>
+                  <div>
+                    <span>Territory</span>
+                    <strong>{selectedDoctor.territoryId ? territoryNameById.get(selectedDoctor.territoryId) ?? "Assigned" : "Unassigned"}</strong>
+                  </div>
+                  <div>
+                    <span>Location</span>
+                    <strong>{selectedDoctor.lat != null && selectedDoctor.lon != null ? "Mapped" : "Missing"}</strong>
+                  </div>
+                  <div>
+                    <span>Last Met</span>
+                    <strong>{selectedLatestVisit ? new Date(selectedLatestVisit.visitTime).toLocaleDateString() : "Never"}</strong>
+                  </div>
                 </div>
-                <p className="notes">{selectedDoctor.notes || "No notes yet."}</p>
+                <div className="doc-location-card">
+                  <div>
+                    <span>Directory Location</span>
+                    <strong>{doctorLocationLabel(selectedDoctor, selectedDoctor.territoryId ? territoryNameById.get(selectedDoctor.territoryId) : undefined)}</strong>
+                  </div>
+                  <Button className="ghost" onClick={openSelectedDoctorRoute} disabled={selectedDoctor.lat == null || selectedDoctor.lon == null}>
+                    Open Route
+                  </Button>
+                </div>
+                {selectedDoctor.notes && <p className="notes">{selectedDoctor.notes}</p>}
 
                 <SectionTitle title="Log Visit" subtitle="Offline queue enabled." />
                 <div className="inline-form">
@@ -764,27 +924,38 @@ export default function MrDashboard() {
                     Follow-up required
                   </label>
                   <Button onClick={logVisit}>Log Visit</Button>
+                  <Button className="ghost" onClick={() => void markSelectedDoctorMet()}>Mark Met Now</Button>
                 </div>
 
                 <SectionTitle title="Visit History" subtitle="Most recent visits for this doctor." />
-                <div className="table-list">
-                  {visitHistory.length === 0 && <p className="muted">No visits yet.</p>}
-                  {visitHistory.map((visit) => (
-                    <div key={visit.id} className="table-row">
-                      <div>
-                        <strong>{visit.outcome}</strong>
-                        <p className="muted">{new Date(visit.visitTime).toLocaleString()}</p>
-                        {visit.notes && <p>{visit.notes}</p>}
-                        {visit.followUpRequired && <Pill>Follow-up</Pill>}
+                {visitHistory.length === 0 && <p className="muted">No visits logged yet.</p>}
+                <div className="visit-tl">
+                  {visitHistory.map((visit) => {
+                    const positive = /met|done|completed|discussed|visited/i.test(visit.outcome);
+                    return (
+                      <div key={visit.id} className="visit-tl-row">
+                        <div className={`visit-tl-dot${positive ? " positive" : ""}`} />
+                        <div className="visit-tl-body">
+                          <div className="visit-tl-head">
+                            <strong>{visit.outcome}</strong>
+                            <span className="visit-tl-time">
+                              {new Date(visit.visitTime).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                              {" · "}
+                              {new Date(visit.visitTime).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                          {visit.notes && <p className="visit-tl-notes">{visit.notes}</p>}
+                          <div className="visit-tl-footer">
+                            {visit.followUpRequired && <Pill>Follow-up required</Pill>}
+                            <Pill>{visit.gpsCaptured ? "GPS ✓" : "No GPS"}</Pill>
+                            {!visit.gpsCaptured && (
+                              <Button className="ghost" onClick={() => handleCaptureGps(visit.id)}>Attach GPS</Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="row-actions">
-                        <Pill>{visit.gpsCaptured ? "GPS Captured" : "No GPS"}</Pill>
-                        <Button className="ghost" onClick={() => handleCaptureGps(visit.id)}>
-                          Capture GPS
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <label className="muted">
                   <input type="checkbox" checked={gpsOptIn} onChange={(e) => setGpsOptIn(e.target.checked)} /> I opt in

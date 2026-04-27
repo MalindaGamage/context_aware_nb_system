@@ -1740,10 +1740,11 @@ export default function NbaDashboardPage() {
         </Card>
       </div>
 
-      <div className="pn-section-head">
-        <h2>Next Best Actions</h2>
-        <Pill>Ranked by AI scoring</Pill>
-      </div>
+      <div className="pn-nba-section">
+        <div className="pn-section-head">
+          <h2>Next Best Actions</h2>
+          <Pill>Ranked by AI scoring · {recommendations.length} actions</Pill>
+        </div>
 
       <div className="pn-list">
         {recommendations.map((item, index) => (
@@ -1854,6 +1855,8 @@ export default function NbaDashboardPage() {
             </div>
           </Card>
         ))}
+      </div>
+
       </div>
 
       <div className="pn-offline-status">
