@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   activateScoringConfig,
+  createAdminProduct,
   createScoringConfig,
   fetchActiveScoringConfig,
   fetchAdminProducts,
   fetchAuditLogs,
   fetchScoringConfigs,
+  updateAdminProduct,
   type AuditLog,
+  type CreateProductRequest,
   type ProductSummary,
   type ScoringConfig,
 } from "../api";
@@ -23,6 +26,15 @@ const defaultSecurity = {
   retention90d: true,
 };
 
+const emptyProductForm: CreateProductRequest = {
+  name: "",
+  code: "",
+  description: "",
+  brandName: "",
+  manufacturerType: "MANUFACTURED",
+  active: true,
+};
+
 export default function AdminSettingsPage() {
   const { token } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("rules");
@@ -32,6 +44,8 @@ export default function AdminSettingsPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [security, setSecurity] = useState(defaultSecurity);
   const [weightsText, setWeightsText] = useState("");
+  const [productForm, setProductForm] = useState<CreateProductRequest>(emptyProductForm);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
 
   const load = async () => {
@@ -89,6 +103,53 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const saveProduct = async () => {
+    if (!token) return;
+    const request = {
+      ...productForm,
+      name: productForm.name.trim(),
+      code: productForm.code.trim().toUpperCase(),
+      description: productForm.description?.trim() || undefined,
+      brandName: productForm.brandName?.trim() || undefined,
+      manufacturerType: productForm.manufacturerType?.trim().toUpperCase() || undefined,
+    };
+    if (!request.name || !request.code) {
+      setStatus("Enter product name and code");
+      return;
+    }
+
+    try {
+      if (editingProductId) {
+        await updateAdminProduct(token, editingProductId, request);
+      } else {
+        await createAdminProduct(token, request);
+      }
+      setProductForm(emptyProductForm);
+      setEditingProductId(null);
+      await load();
+      setStatus(editingProductId ? "Product updated" : "Product created");
+    } catch {
+      setStatus("Failed to save product");
+    }
+  };
+
+  const editProduct = (product: ProductSummary) => {
+    setEditingProductId(product.id);
+    setProductForm({
+      name: product.name,
+      code: product.code,
+      description: product.category === "General" ? "" : product.category,
+      brandName: product.brandName ?? "",
+      manufacturerType: product.manufacturerType ?? "MANUFACTURED",
+      active: product.active,
+    });
+  };
+
+  const cancelProductEdit = () => {
+    setEditingProductId(null);
+    setProductForm(emptyProductForm);
+  };
+
   if (!token) return null;
 
   return (
@@ -127,28 +188,100 @@ export default function AdminSettingsPage() {
       )}
 
       {activeTab === "products" && (
-        <Card className="pn-table-card">
-          <table className="pn-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Category</th>
-                <th>Status</th>
-                <th>Assigned Doctors</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((product) => (
-                <tr key={product.id}>
-                  <td>{product.name}</td>
-                  <td>{product.category}</td>
-                  <td><Pill>{product.active ? "Active" : "Inactive"}</Pill></td>
-                  <td>{product.assignedDoctors}</td>
+        <>
+          <Card>
+            <div className="pn-section-head">
+              <h2>{editingProductId ? "Edit Product" : "Add Product"}</h2>
+              {editingProductId && <Pill>Editing</Pill>}
+            </div>
+            <form
+              className="inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveProduct();
+              }}
+            >
+              <Field label="Product Name">
+                <input
+                  value={productForm.name}
+                  onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="Amlodipine"
+                />
+              </Field>
+              <Field label="Code">
+                <input
+                  value={productForm.code}
+                  onChange={(event) => setProductForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))}
+                  placeholder="AML-5"
+                />
+              </Field>
+              <Field label="Brand Name">
+                <input
+                  value={productForm.brandName ?? ""}
+                  onChange={(event) => setProductForm((current) => ({ ...current, brandName: event.target.value }))}
+                  placeholder="PressureLess"
+                />
+              </Field>
+              <Field label="Manufacturer Type">
+                <select
+                  value={productForm.manufacturerType ?? ""}
+                  onChange={(event) => setProductForm((current) => ({ ...current, manufacturerType: event.target.value }))}
+                >
+                  <option value="MANUFACTURED">Manufactured</option>
+                  <option value="IMPORTED">Imported</option>
+                  <option value="GENERAL">General</option>
+                </select>
+              </Field>
+              <Field label="Category / Description">
+                <input
+                  value={productForm.description ?? ""}
+                  onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="Hypertension management"
+                />
+              </Field>
+              <Field label="Status">
+                <select
+                  value={productForm.active ? "active" : "inactive"}
+                  onChange={(event) => setProductForm((current) => ({ ...current, active: event.target.value === "active" }))}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </Field>
+              <Button type="submit">{editingProductId ? "Update Product" : "Add Product"}</Button>
+              {editingProductId && <Button type="button" className="ghost" onClick={cancelProductEdit}>Cancel</Button>}
+            </form>
+          </Card>
+
+          <Card className="pn-table-card">
+            <table className="pn-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Code</th>
+                  <th>Brand</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Assigned Doctors</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+              </thead>
+              <tbody>
+                {products.map((product) => (
+                  <tr key={product.id}>
+                    <td>{product.name}</td>
+                    <td>{product.code}</td>
+                    <td>{product.brandName || "N/A"}</td>
+                    <td>{product.category}</td>
+                    <td><Pill>{product.active ? "Active" : "Inactive"}</Pill></td>
+                    <td>{product.assignedDoctors}</td>
+                    <td><Button className="ghost" onClick={() => editProduct(product)}>Edit</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </>
       )}
 
       {activeTab === "security" && (

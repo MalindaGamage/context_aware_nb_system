@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 @RestController
 public class UserController {
   private static final Set<String> MR_ONLY = Set.of("MR");
+  private static final Set<String> FIELD_REP_ROLES = Set.of("MR", "SALES_REP");
 
   private final UserService userService;
 
@@ -136,12 +137,12 @@ public class UserController {
   @PostMapping("/api/v1/users/{userId}/territories")
   public List<TerritoryResponse> assignTerritory(@PathVariable UUID userId,
                                                  @Valid @RequestBody AssignTerritoryRequest request) {
-    return userService.replaceAssignments(userId, request, MR_ONLY);
+    return userService.replaceAssignments(userId, request, FIELD_REP_ROLES);
   }
 
   @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
   @DeleteMapping("/api/v1/users/{userId}/territories/{territoryId}")
   public List<TerritoryResponse> removeAssignment(@PathVariable UUID userId, @PathVariable UUID territoryId) {
-    return userService.removeAssignment(userId, territoryId, MR_ONLY);
+    return userService.removeAssignment(userId, territoryId, FIELD_REP_ROLES);
   }
 }

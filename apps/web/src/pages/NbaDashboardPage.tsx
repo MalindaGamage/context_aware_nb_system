@@ -2,6 +2,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   resetSessionExpiredState,
   capturePharmacyFeedback,
+  captureVisitGps,
+  createPharmacyVisit,
+  createVisit,
   isUnauthorizedError,
   fetchDoctors,
   onSessionExpired,
@@ -74,6 +77,7 @@ type MapDestination = {
   address: string;
   location: LatLngLiteral;
   doctor?: Doctor;
+  pharmacyId?: string;
   distanceKm: number | null;
   placeId?: string;
 };
@@ -205,6 +209,7 @@ function buildScheduleRequest(draft: ScheduleDraft): UpdateUserSchedulePreferenc
 export default function NbaDashboardPage() {
   const { token, username, logout } = useAuth();
   const [territories, setTerritories] = useState<Territory[]>([]);
+  const [selectedTerritoryId, setSelectedTerritoryId] = useState("");
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [pharmacies, setPharmacies] = useState<MapDestination[]>([]);
   const [recommendations, setRecommendations] = useState<NbaRecommendation[]>([]);
@@ -250,6 +255,8 @@ export default function NbaDashboardPage() {
   const [pharmacyRadiusKm, setPharmacyRadiusKm] = useState("10");
   const [showTrafficLayer, setShowTrafficLayer] = useState(true);
   const [selectedDestinationId, setSelectedDestinationId] = useState("");
+  const [visitOutcome, setVisitOutcome] = useState("Met");
+  const [visitNotes, setVisitNotes] = useState("");
   const [routeSummary, setRouteSummary] = useState<RouteSummary | null>(null);
   const [selectedPlaceDetails, setSelectedPlaceDetails] = useState<PlaceDetailsSummary | null>(null);
   const [commuteSummaries, setCommuteSummaries] = useState<CommuteSummary[]>([]);
@@ -282,15 +289,19 @@ export default function NbaDashboardPage() {
   const load = async (authToken: string) => {
     try {
       const myTerritories = await fetchMyTerritories(authToken);
-      const territoryId = myTerritories[0]?.id;
       const [doctorPage, visitsPage, schedule, products, pharmacyPage] = await Promise.all([
-        fetchDoctors(authToken, { territoryId, size: 200 }),
+        fetchDoctors(authToken, { size: 200 }),
         fetchMyVisits(authToken, 0, 100),
         fetchMySchedulePreference(authToken),
         fetchMyAssignedProducts(authToken),
-        fetchPharmacies(authToken, { territoryId, size: 100 }),
+        fetchPharmacies(authToken, { size: 100 }),
       ]);
       setTerritories(myTerritories);
+      setSelectedTerritoryId((current) =>
+        current && myTerritories.some((territory) => territory.id === current)
+          ? current
+          : myTerritories[0]?.id ?? ""
+      );
       setDoctors(doctorPage.content);
       setDoctorCount(doctorPage.meta.totalElements);
       setVisitCount(visitsPage.meta.totalElements);
@@ -352,8 +363,23 @@ export default function NbaDashboardPage() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  const activeTerritory = useMemo(
+    () => territories.find((territory) => territory.id === selectedTerritoryId) ?? territories[0] ?? null,
+    [selectedTerritoryId, territories]
+  );
+
+  const mapDoctors = useMemo(
+    () => activeTerritory ? doctors.filter((doctor) => doctor.territoryId === activeTerritory.id) : doctors,
+    [activeTerritory, doctors]
+  );
+
+  const mapPharmacyAccounts = useMemo(
+    () => activeTerritory ? pharmacyAccounts.filter((pharmacy) => pharmacy.territoryId === activeTerritory.id) : pharmacyAccounts,
+    [activeTerritory, pharmacyAccounts]
+  );
+
   const destinations = useMemo(() => {
-    const doctorDestinations = doctors
+    const doctorDestinations = mapDoctors
       .map((doctor) => {
         const location = doctorLocation(doctor);
         if (!location) return null;
@@ -374,7 +400,7 @@ export default function NbaDashboardPage() {
       distanceKm: currentPosition ? haversineKm(currentPosition, pharmacy.location) : null,
     }));
 
-    const assignedPharmacyDestinations = pharmacyAccounts
+    const assignedPharmacyDestinations = mapPharmacyAccounts
       .map((pharmacy) => {
         if (typeof pharmacy.lat !== "number" || typeof pharmacy.lon !== "number") {
           return null;
@@ -386,6 +412,7 @@ export default function NbaDashboardPage() {
           name: pharmacy.name,
           address: pharmacy.address || pharmacy.notes || "Assigned pharmacy",
           location,
+          pharmacyId: pharmacy.id,
           placeId: pharmacy.googlePlaceId ?? undefined,
           distanceKm: currentPosition ? haversineKm(currentPosition, location) : null,
         };
@@ -405,14 +432,12 @@ export default function NbaDashboardPage() {
       const rightDistance = right.distanceKm ?? Number.POSITIVE_INFINITY;
       return leftDistance - rightDistance;
     });
-  }, [currentPosition, doctors, pharmacies, pharmacyAccounts]);
+  }, [currentPosition, mapDoctors, mapPharmacyAccounts, pharmacies]);
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId]
   );
-
-  const activeTerritory = territories[0] ?? null;
 
   const dayPlanStatus = useMemo(() => {
     const start = scheduleDraft.workdayStart || "08:30";
@@ -456,7 +481,7 @@ export default function NbaDashboardPage() {
   }, [recommendations]);
 
   const recommendedDestinationIdByRecommendation = useMemo(() => {
-    const pharmacyById = new Set(pharmacyAccounts.map((pharmacy) => pharmacy.id));
+    const pharmacyById = new Set(mapPharmacyAccounts.map((pharmacy) => pharmacy.id));
     const destinationByPlaceId = new Map<string, string>();
     destinations.forEach((destination) => {
       if (destination.kind === "pharmacy" && destination.placeId) {
@@ -489,13 +514,10 @@ export default function NbaDashboardPage() {
       );
     });
     return mapping;
-  }, [destinations, pharmacyAccounts, recommendations]);
+  }, [destinations, mapPharmacyAccounts, recommendations]);
 
   const regionCenter = useMemo(() => {
-    const territoryDoctors = activeTerritory
-      ? doctors.filter((doctor) => doctor.territoryId === activeTerritory.id)
-      : doctors;
-    const positionedDoctors = territoryDoctors.map(doctorLocation).filter((location): location is LatLngLiteral => Boolean(location));
+    const positionedDoctors = mapDoctors.map(doctorLocation).filter((location): location is LatLngLiteral => Boolean(location));
     if (positionedDoctors.length === 0) {
       return currentPosition ?? searchAnchor ?? DEFAULT_CENTER;
     }
@@ -512,7 +534,7 @@ export default function NbaDashboardPage() {
       lat: sum.lat / positionedDoctors.length,
       lng: sum.lng / positionedDoctors.length,
     };
-  }, [activeTerritory, currentPosition, doctors, searchAnchor]);
+  }, [currentPosition, mapDoctors, searchAnchor]);
 
   useEffect(() => {
     if (!token) return;
@@ -1073,7 +1095,9 @@ export default function NbaDashboardPage() {
     try {
       const result = await syncBatch(token, { strategy: syncStrategy, visits, feedback });
       const appliedVisitRefs = result.visitResults.filter((item) => item.status === "APPLIED").map((item) => item.clientReferenceId);
-      const appliedFeedbackRefs = result.feedbackResults.filter((item) => item.status === "APPLIED").map((item) => item.clientReferenceId);
+      const appliedFeedbackRefs = result.feedbackResults
+        .filter((item) => item.status === "APPLIED" || item.status === "REJECTED")
+        .map((item) => item.clientReferenceId);
       await removeQueuedItems(appliedVisitRefs, appliedFeedbackRefs);
       await saveConflicts(result.conflicts);
       await refreshOffline();
@@ -1180,6 +1204,54 @@ export default function NbaDashboardPage() {
     });
   };
 
+  const markSelectedVisit = async () => {
+    if (!token || !selectedDestination) return;
+    const outcome = visitOutcome.trim() || (selectedDestination.kind === "doctor" ? "Met" : "Visited");
+    const timestamp = new Date().toISOString();
+    try {
+      if (selectedDestination.kind === "doctor" && selectedDestination.doctor) {
+        const visit = await createVisit(token, {
+          doctorId: selectedDestination.doctor.id,
+          visitTime: timestamp,
+          outcome,
+          notes: visitNotes || `Marked from Field Map at ${selectedDestination.name}`,
+          followUpRequired: false,
+          clientReferenceId: `map-doctor-${selectedDestination.doctor.id}-${Date.now()}`,
+        });
+        if (currentPosition && locationConsent) {
+          await captureVisitGps(token, visit.id, {
+            lat: currentPosition.lat,
+            lon: currentPosition.lng,
+            optIn: true,
+          });
+        }
+        setStatus(`Doctor visit marked for ${selectedDestination.name}`);
+        setVisitNotes("");
+        await load(token);
+        return;
+      }
+
+      if (selectedDestination.kind === "pharmacy" && selectedDestination.pharmacyId) {
+        await createPharmacyVisit(token, {
+          pharmacyId: selectedDestination.pharmacyId,
+          visitedAt: timestamp,
+          outcome,
+          notes: visitNotes || `Marked from Field Map at ${selectedDestination.name}`,
+          clientReferenceId: `map-pharmacy-${selectedDestination.pharmacyId}-${Date.now()}`,
+          lat: currentPosition && locationConsent ? currentPosition.lat : undefined,
+          lon: currentPosition && locationConsent ? currentPosition.lng : undefined,
+        });
+        setStatus(`Pharmacy visit marked for ${selectedDestination.name}`);
+        setVisitNotes("");
+        return;
+      }
+
+      setStatus("Select an assigned doctor or assigned pharmacy to mark a visit");
+    } catch {
+      setStatus("Failed to mark visit");
+    }
+  };
+
   if (!token) return null;
 
   return (
@@ -1228,7 +1300,14 @@ export default function NbaDashboardPage() {
               />
             </Field>
             <Field label="Region">
-              <input value={activeTerritory?.name ?? "All assigned regions"} readOnly />
+              <select value={selectedTerritoryId} onChange={(event) => setSelectedTerritoryId(event.target.value)}>
+                {territories.length === 0 && <option value="">No assigned regions</option>}
+                {territories.map((territory) => (
+                  <option key={territory.id} value={territory.id}>
+                    {territory.name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Travel Mode">
               <select value={travelMode} onChange={(event) => setTravelMode(event.target.value as TravelMode)}>
@@ -1336,6 +1415,27 @@ export default function NbaDashboardPage() {
                     </div>
                   </div>
                   <p className="muted">{routeSummary?.sourceLabel ?? "Waiting for route calculation"}</p>
+                  <div className="pn-visit-quick-form">
+                    <Field label="Visit Outcome">
+                      <select value={visitOutcome} onChange={(event) => setVisitOutcome(event.target.value)}>
+                        <option value="Met">Met</option>
+                        <option value="Visited">Visited</option>
+                        <option value="Not Available">Not Available</option>
+                        <option value="Follow-up Required">Follow-up Required</option>
+                      </select>
+                    </Field>
+                    <Field label="Visit Notes">
+                      <textarea
+                        rows={2}
+                        value={visitNotes}
+                        onChange={(event) => setVisitNotes(event.target.value)}
+                        placeholder="What happened during the visit or meeting"
+                      />
+                    </Field>
+                    <Button type="button" onClick={() => void markSelectedVisit()}>
+                      {selectedDestination.kind === "doctor" ? "Mark Doctor Visit" : "Mark Pharmacy Visit"}
+                    </Button>
+                  </div>
                   {selectedPlaceDetails && (
                     <div className="pn-detail-list">
                       <p className="muted">{selectedPlaceDetails.address}</p>

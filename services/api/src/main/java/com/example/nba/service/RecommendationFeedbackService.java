@@ -59,7 +59,7 @@ public class RecommendationFeedbackService {
     return outcome.response();
   }
 
-  @Transactional
+  @Transactional(noRollbackFor = ResponseStatusException.class)
   public SyncOutcome syncFeedback(SyncFeedbackRequest request,
                                   UUID userId,
                                   boolean enforceMrScope,

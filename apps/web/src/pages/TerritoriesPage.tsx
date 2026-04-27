@@ -3,6 +3,7 @@ import {
   assignTerritoryToMr,
   createTerritory,
   fetchMrSummaries,
+  fetchSalesReps,
   fetchTerritoryOverview,
   type CreateTerritoryRequest,
   type TerritoryOverview,
@@ -17,20 +18,28 @@ export default function TerritoriesPage() {
   const { token } = useAuth();
   const [rows, setRows] = useState<TerritoryOverview[]>([]);
   const [mrs, setMrs] = useState<UserSummary[]>([]);
+  const [salesReps, setSalesReps] = useState<UserSummary[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [territoryForm, setTerritoryForm] = useState<CreateTerritoryRequest>(emptyTerritoryForm);
-  const [assignSelection, setAssignSelection] = useState<Record<string, string>>({});
+  const [mrAssignSelection, setMrAssignSelection] = useState<Record<string, string>>({});
+  const [salesRepAssignSelection, setSalesRepAssignSelection] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
 
   const loadData = async () => {
     if (!token) return;
     try {
-      const [overview, users] = await Promise.all([fetchTerritoryOverview(token, {}), fetchMrSummaries(token)]);
+      const [overview, mrUsers, salesRepUsers] = await Promise.all([
+        fetchTerritoryOverview(token, {}),
+        fetchMrSummaries(token),
+        fetchSalesReps(token),
+      ]);
       setRows(overview);
-      setMrs(users);
+      setMrs(mrUsers);
+      setSalesReps(salesRepUsers);
     } catch {
       setRows([]);
       setMrs([]);
+      setSalesReps([]);
       setStatus("Failed to load territory data");
     }
   };
@@ -50,6 +59,18 @@ export default function TerritoriesPage() {
     }
     return map;
   }, [mrs]);
+
+  const salesRepByTerritory = useMemo(() => {
+    const map = new Map<string, UserSummary[]>();
+    for (const rep of salesReps) {
+      for (const territory of rep.territories) {
+        const current = map.get(territory.id) ?? [];
+        current.push(rep);
+        map.set(territory.id, current);
+      }
+    }
+    return map;
+  }, [salesReps]);
 
   if (!token) return null;
 
@@ -74,20 +95,24 @@ export default function TerritoriesPage() {
     }
   };
 
-  const assignMr = async (territoryId: string) => {
-    const mrId = assignSelection[territoryId];
-    if (!mrId) {
-      setStatus("Select an MR to assign");
+  const assignRep = async (
+    territoryId: string,
+    userId: string | undefined,
+    roleLabel: "MR" | "sales rep",
+    clearSelection: () => void
+  ) => {
+    if (!userId) {
+      setStatus(`Select a ${roleLabel} to assign`);
       return;
     }
 
     try {
-      await assignTerritoryToMr(token, mrId, { territoryId });
-      setAssignSelection((current) => ({ ...current, [territoryId]: "" }));
-      setStatus("MR assigned to territory");
+      await assignTerritoryToMr(token, userId, { territoryId });
+      clearSelection();
+      setStatus(`${roleLabel === "MR" ? "MR" : "Sales rep"} assigned to territory`);
       await loadData();
     } catch {
-      setStatus("Failed to assign MR");
+      setStatus(`Failed to assign ${roleLabel}`);
     }
   };
 
@@ -96,7 +121,7 @@ export default function TerritoriesPage() {
       <div className="pn-header">
         <div>
           <h1>Territory Management</h1>
-          <p>Manage MR assignments and territory boundaries</p>
+          <p>Manage representative assignments and territory boundaries</p>
         </div>
         <Button onClick={() => setShowCreateForm((visible) => !visible)}>
           {showCreateForm ? "Cancel" : "+ Add Territory"}
@@ -129,7 +154,8 @@ export default function TerritoriesPage() {
 
       <div className="pn-territory-grid">
         {rows.map((row) => {
-          const reps = mrByTerritory.get(row.territoryId) ?? [];
+          const assignedMrs = mrByTerritory.get(row.territoryId) ?? [];
+          const assignedSalesReps = salesRepByTerritory.get(row.territoryId) ?? [];
           const coverage = row.doctorCount === 0 ? 0 : Math.round((row.visitCount / row.doctorCount) * 100);
           return (
             <Card key={row.territoryId} className="pn-territory-card">
@@ -139,26 +165,33 @@ export default function TerritoriesPage() {
               </div>
               <div className="pn-territory-kpis">
                 <div><strong>{row.doctorCount}</strong><span>Doctors</span></div>
-                <div><strong>{row.assignedMrCount}</strong><span>MRs</span></div>
+                <div><strong>{assignedMrs.length}</strong><span>MRs</span></div>
+                <div><strong>{assignedSalesReps.length}</strong><span>SRs</span></div>
                 <div><strong>{coverage}%</strong><span>Coverage</span></div>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${Math.min(100, coverage)}%` }} />
               </div>
               <div className="pn-rep-list">
-                {reps.length === 0 && <p className="muted">No assigned representatives</p>}
-                {reps.map((rep) => (
+                {assignedMrs.length === 0 && assignedSalesReps.length === 0 && <p className="muted">No assigned representatives</p>}
+                {assignedMrs.map((mr) => (
+                  <div key={mr.id} className="pn-rep-row">
+                    <span>{mr.fullName}</span>
+                    <Pill>MR | {mr.territories.length} territories</Pill>
+                  </div>
+                ))}
+                {assignedSalesReps.map((rep) => (
                   <div key={rep.id} className="pn-rep-row">
                     <span>{rep.fullName}</span>
-                    <Pill>{rep.territories.length} territories</Pill>
+                    <Pill>SR | {rep.territories.length} territories</Pill>
                   </div>
                 ))}
               </div>
               <div className="pn-territory-assign">
                 <select
-                  value={assignSelection[row.territoryId] ?? ""}
+                  value={mrAssignSelection[row.territoryId] ?? ""}
                   onChange={(event) =>
-                    setAssignSelection((current) => ({ ...current, [row.territoryId]: event.target.value }))
+                    setMrAssignSelection((current) => ({ ...current, [row.territoryId]: event.target.value }))
                   }
                 >
                   <option value="">Select MR</option>
@@ -168,7 +201,37 @@ export default function TerritoriesPage() {
                     </option>
                   ))}
                 </select>
-                <Button onClick={() => assignMr(row.territoryId)}>Assign MR</Button>
+                <Button
+                  onClick={() =>
+                    assignRep(row.territoryId, mrAssignSelection[row.territoryId], "MR", () =>
+                      setMrAssignSelection((current) => ({ ...current, [row.territoryId]: "" }))
+                    )
+                  }
+                >
+                  Assign MR
+                </Button>
+                <select
+                  value={salesRepAssignSelection[row.territoryId] ?? ""}
+                  onChange={(event) =>
+                    setSalesRepAssignSelection((current) => ({ ...current, [row.territoryId]: event.target.value }))
+                  }
+                >
+                  <option value="">Select SR</option>
+                  {salesReps.map((rep) => (
+                    <option key={rep.id} value={rep.id}>
+                      {rep.fullName}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  onClick={() =>
+                    assignRep(row.territoryId, salesRepAssignSelection[row.territoryId], "sales rep", () =>
+                      setSalesRepAssignSelection((current) => ({ ...current, [row.territoryId]: "" }))
+                    )
+                  }
+                >
+                  Assign SR
+                </Button>
               </div>
             </Card>
           );

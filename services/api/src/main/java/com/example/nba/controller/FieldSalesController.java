@@ -2,8 +2,10 @@ package com.example.nba.controller;
 
 import com.example.nba.dto.CreatePharmacyFeedbackRequest;
 import com.example.nba.dto.CreatePharmacyOrderRequest;
+import com.example.nba.dto.CreatePharmacyVisitRequest;
 import com.example.nba.dto.PharmacyFeedbackResponse;
 import com.example.nba.dto.PharmacyOrderResponse;
+import com.example.nba.dto.PharmacyVisitResponse;
 import com.example.nba.dto.SalesTrendResponse;
 import com.example.nba.service.PharmacySalesService;
 import jakarta.validation.Valid;
@@ -41,6 +43,13 @@ public class FieldSalesController {
   public PharmacyFeedbackResponse captureFeedback(@Valid @RequestBody CreatePharmacyFeedbackRequest request,
                                                   @AuthenticationPrincipal Jwt jwt) {
     return pharmacySalesService.captureFeedback(request, UUID.fromString(jwt.getSubject()), isMr(jwt));
+  }
+
+  @PreAuthorize("hasAnyAuthority('ROLE_MR','ROLE_SALES_REP','ROLE_MANAGER','ROLE_ADMIN')")
+  @PostMapping("/api/v1/pharmacy-visits")
+  public PharmacyVisitResponse createPharmacyVisit(@Valid @RequestBody CreatePharmacyVisitRequest request,
+                                                   @AuthenticationPrincipal Jwt jwt) {
+    return pharmacySalesService.createVisit(request, UUID.fromString(jwt.getSubject()), isMr(jwt) || isSalesRep(jwt));
   }
 
   @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")

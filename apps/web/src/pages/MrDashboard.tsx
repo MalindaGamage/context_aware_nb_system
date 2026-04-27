@@ -301,7 +301,7 @@ export default function MrDashboard() {
         .filter((item) => item.status === "APPLIED")
         .map((item) => item.clientReferenceId);
       const appliedFeedbackRefs = result.feedbackResults
-        .filter((item) => item.status === "APPLIED")
+        .filter((item) => item.status === "APPLIED" || item.status === "REJECTED")
         .map((item) => item.clientReferenceId);
 
       await removeQueuedItems(appliedVisitRefs, appliedFeedbackRefs);

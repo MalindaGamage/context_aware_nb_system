@@ -76,4 +76,8 @@
     <changeSet id="018-walasmulla-demo-data" author="codex">
         <sqlFile path="db/changelog/018_walasmulla_demo_data.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
     </changeSet>
+
+    <changeSet id="019-pharmacy-visits" author="codex">
+        <sqlFile path="db/changelog/019_pharmacy_visits.sql" relativeToChangelogFile="false" splitStatements="true" endDelimiter=";"/>
+    </changeSet>
 </databaseChangeLog>

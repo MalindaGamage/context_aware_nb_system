@@ -1,6 +1,7 @@
 package com.example.nba.controller;
 
 import com.example.nba.dto.AuditLogResponse;
+import com.example.nba.dto.CreateProductRequest;
 import com.example.nba.dto.CreateScoringConfigRequest;
 import com.example.nba.dto.EvaluationSummaryResponse;
 import com.example.nba.dto.PageResponse;
@@ -23,6 +24,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -102,6 +104,18 @@ public class AdminController {
   @GetMapping("/api/v1/admin/products")
   public List<ProductSummaryResponse> products() {
     return productService.listProducts();
+  }
+
+  @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+  @PostMapping("/api/v1/admin/products")
+  public ProductSummaryResponse createProduct(@Valid @RequestBody CreateProductRequest request) {
+    return productService.createProduct(request);
+  }
+
+  @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+  @PutMapping("/api/v1/admin/products/{productId}")
+  public ProductSummaryResponse updateProduct(@PathVariable UUID productId, @Valid @RequestBody CreateProductRequest request) {
+    return productService.updateProduct(productId, request);
   }
 
   @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")

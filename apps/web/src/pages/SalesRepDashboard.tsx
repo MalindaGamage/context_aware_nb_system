@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   createPharmacyOrder,
+  createPharmacyVisit,
   fetchMyAssignedProducts,
   fetchMyTerritories,
   fetchPharmacies,
   type Pharmacy,
+  type Territory,
   type UserProductAssignment,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
@@ -16,12 +18,19 @@ type OrderItemDraft = {
   amount: string;
 };
 
+type PharmacyGroup = {
+  territoryId: string;
+  territoryName: string;
+  pharmacies: Pharmacy[];
+};
+
 export default function SalesRepDashboard() {
   const { token } = useAuth();
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [products, setProducts] = useState<UserProductAssignment[]>([]);
-  const [territoryName, setTerritoryName] = useState("Assigned territory");
+  const [territories, setTerritories] = useState<Territory[]>([]);
   const [pharmacyId, setPharmacyId] = useState("");
+  const [pharmacyVisitOutcome, setPharmacyVisitOutcome] = useState("Visited");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<OrderItemDraft[]>([{ productId: "", quantity: "1", amount: "" }]);
   const [status, setStatus] = useState("");
@@ -30,12 +39,11 @@ export default function SalesRepDashboard() {
     if (!token) return;
     const load = async () => {
       try {
-        const territories = await fetchMyTerritories(token);
-        const territoryId = territories[0]?.id;
-        setTerritoryName(territories[0]?.name ?? "Assigned territory");
+        const territoryRows = await fetchMyTerritories(token);
+        setTerritories(territoryRows);
         const [productRows, pharmacyPage] = await Promise.all([
           fetchMyAssignedProducts(token),
-          fetchPharmacies(token, { territoryId, size: 100 }),
+          fetchPharmacies(token, { size: 100 }),
         ]);
         setProducts(productRows);
         setPharmacies(pharmacyPage.content);
@@ -58,6 +66,39 @@ export default function SalesRepDashboard() {
     () => items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
     [items]
   );
+
+  const territoryLabel = useMemo(() => {
+    const names = territories.map((territory) => territory.name).filter(Boolean);
+    if (names.length === 0) return "Assigned territory";
+    if (names.length <= 2) return names.join(", ");
+    return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+  }, [territories]);
+
+  const territoryScopeLabel = territories.length === 1 ? "active region" : `${territories.length} active regions`;
+  const pharmacyScopeLabel = territories.length === 1 ? "in territory" : "across territories";
+
+  const pharmacyGroups = useMemo<PharmacyGroup[]>(() => {
+    const pharmaciesByTerritory = pharmacies.reduce((map, pharmacy) => {
+      const key = pharmacy.territoryId ?? "unassigned";
+      const current = map.get(key) ?? [];
+      current.push(pharmacy);
+      map.set(key, current);
+      return map;
+    }, new Map<string, Pharmacy[]>());
+
+    const assignedGroups = territories.map((territory) => ({
+      territoryId: territory.id,
+      territoryName: territory.name,
+      pharmacies: pharmaciesByTerritory.get(territory.id) ?? [],
+    }));
+
+    const knownTerritoryIds = new Set(territories.map((territory) => territory.id));
+    const otherPharmacies = pharmacies.filter((pharmacy) => !pharmacy.territoryId || !knownTerritoryIds.has(pharmacy.territoryId));
+
+    return otherPharmacies.length > 0
+      ? [...assignedGroups, { territoryId: "unassigned", territoryName: "Other assigned pharmacies", pharmacies: otherPharmacies }]
+      : assignedGroups;
+  }, [pharmacies, territories]);
 
   const submitOrder = async () => {
     if (!token || !pharmacyId) return;
@@ -89,6 +130,26 @@ export default function SalesRepDashboard() {
     }
   };
 
+  const markPharmacyVisit = async () => {
+    if (!token || !pharmacyId) {
+      setStatus("Select a pharmacy to mark a visit");
+      return;
+    }
+    try {
+      const visit = await createPharmacyVisit(token, {
+        pharmacyId,
+        visitedAt: new Date().toISOString(),
+        outcome: pharmacyVisitOutcome,
+        notes: notes || "Marked from Sales Dashboard",
+        clientReferenceId: `sales-pharmacy-visit-${pharmacyId}-${Date.now()}`,
+      });
+      setStatus(`Pharmacy visit marked for ${visit.pharmacyName}`);
+      setNotes("");
+    } catch {
+      setStatus("Failed to mark pharmacy visit");
+    }
+  };
+
   if (!token) return null;
 
   return (
@@ -102,8 +163,8 @@ export default function SalesRepDashboard() {
 
       <div className="pn-kpi-grid sales-kpi-grid">
         <Card><div className="pn-kpi"><span>Assigned Products</span><strong>{products.length}</strong><em>current portfolio</em></div></Card>
-        <Card><div className="pn-kpi"><span>Target Territory</span><strong>{territoryName}</strong><em>active region</em></div></Card>
-        <Card><div className="pn-kpi"><span>Available Pharmacies</span><strong>{pharmacies.length}</strong><em>in territory</em></div></Card>
+        <Card><div className="pn-kpi"><span>Target Territories</span><strong className="sales-territory-label">{territoryLabel}</strong><em>{territoryScopeLabel}</em></div></Card>
+        <Card><div className="pn-kpi"><span>Available Pharmacies</span><strong>{pharmacies.length}</strong><em>{pharmacyScopeLabel}</em></div></Card>
         <Card><div className="pn-kpi"><span>Draft Order Value</span><strong>{totalAmount.toFixed(2)}</strong><em>{totalQuantity} units</em></div></Card>
       </div>
 
@@ -138,11 +199,39 @@ export default function SalesRepDashboard() {
           <Field label="Pharmacy">
             <select value={pharmacyId} onChange={(event) => setPharmacyId(event.target.value)}>
               <option value="">Select pharmacy</option>
-              {pharmacies.map((pharmacy) => (
-                <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
+              {pharmacyGroups.map((group) => (
+                <optgroup key={group.territoryId} label={group.territoryName}>
+                  {group.pharmacies.map((pharmacy) => (
+                    <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </Field>
+
+          <div className="sales-pharmacy-groups">
+            {pharmacyGroups.map((group) => (
+              <div key={group.territoryId} className="sales-pharmacy-group">
+                <div className="sales-pharmacy-group-head">
+                  <strong>{group.territoryName}</strong>
+                  <Pill>{group.pharmacies.length} pharmacies</Pill>
+                </div>
+                <div className="sales-pharmacy-options">
+                  {group.pharmacies.map((pharmacy) => (
+                    <button
+                      key={pharmacy.id}
+                      type="button"
+                      className={pharmacy.id === pharmacyId ? "sales-pharmacy-option active" : "sales-pharmacy-option"}
+                      onClick={() => setPharmacyId(pharmacy.id)}
+                    >
+                      {pharmacy.name}
+                    </button>
+                  ))}
+                  {group.pharmacies.length === 0 && <p className="muted">No pharmacies assigned in this region.</p>}
+                </div>
+              </div>
+            ))}
+          </div>
 
           {items.map((item, index) => (
             <div key={index} className="inline-form">
@@ -199,6 +288,15 @@ export default function SalesRepDashboard() {
           </Field>
 
           <div className="row-actions">
+            <Field label="Visit Outcome">
+              <select value={pharmacyVisitOutcome} onChange={(event) => setPharmacyVisitOutcome(event.target.value)}>
+                <option value="Visited">Visited</option>
+                <option value="Met Pharmacist">Met Pharmacist</option>
+                <option value="Stock Checked">Stock Checked</option>
+                <option value="Follow-up Required">Follow-up Required</option>
+              </select>
+            </Field>
+            <Button className="ghost" onClick={() => void markPharmacyVisit()}>Mark Pharmacy Visit</Button>
             <Button onClick={() => void submitOrder()}>Submit Order</Button>
           </div>
         </Card>

@@ -269,9 +269,21 @@ export type ScoringConfig = {
 export type ProductSummary = {
   id: string;
   name: string;
+  code: string;
   category: string;
+  brandName: string | null;
+  manufacturerType: string | null;
   active: boolean;
   assignedDoctors: number;
+};
+
+export type CreateProductRequest = {
+  name: string;
+  code: string;
+  description?: string;
+  brandName?: string;
+  manufacturerType?: string;
+  active: boolean;
 };
 
 export type PharmacyOrderItemRequest = {
@@ -463,6 +475,30 @@ export type CaptureVisitGpsRequest = {
   optIn: boolean;
 };
 
+export type CreatePharmacyVisitRequest = {
+  pharmacyId: string;
+  visitedAt: string;
+  outcome: string;
+  notes?: string;
+  clientReferenceId?: string;
+  lat?: number;
+  lon?: number;
+};
+
+export type PharmacyVisitResponse = {
+  id: string;
+  pharmacyId: string;
+  pharmacyName: string;
+  userId: string;
+  territoryId: string | null;
+  visitedAt: string;
+  outcome: string;
+  notes: string | null;
+  clientReferenceId: string | null;
+  gpsCaptured: boolean;
+  createdAt: string;
+};
+
 export type RecommendationDriver = {
   key: string;
   value: string;
@@ -542,7 +578,7 @@ export type SyncBatchRequest = {
 
 export type SyncItemResult = {
   clientReferenceId: string;
-  status: "APPLIED" | "CONFLICT";
+  status: "APPLIED" | "CONFLICT" | "REJECTED";
   serverId: string;
   message: string;
 };
@@ -1010,6 +1046,16 @@ export async function captureVisitGps(token: string, visitId: string, request: C
   return (await res.json()) as Visit;
 }
 
+export async function createPharmacyVisit(token: string, request: CreatePharmacyVisitRequest) {
+  const res = await fetch(`${apiBase}/pharmacy-visits`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create pharmacy visit");
+  return (await res.json()) as PharmacyVisitResponse;
+}
+
 export async function fetchNbaNext(token: string, limit = 5) {
   const res = await fetch(`${apiBase}/nba/next?limit=${limit}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -1164,6 +1210,26 @@ export async function fetchAdminProducts(token: string) {
   });
   if (!res.ok) throw new Error("Failed to load products");
   return (await res.json()) as ProductSummary[];
+}
+
+export async function createAdminProduct(token: string, request: CreateProductRequest) {
+  const res = await fetch(`${apiBase}/admin/products`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to create product");
+  return (await res.json()) as ProductSummary;
+}
+
+export async function updateAdminProduct(token: string, productId: string, request: CreateProductRequest) {
+  const res = await fetch(`${apiBase}/admin/products/${productId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to update product");
+  return (await res.json()) as ProductSummary;
 }
 
 export async function fetchMyAssignedProducts(token: string) {

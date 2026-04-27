@@ -83,6 +83,7 @@ export default function ManagerDashboard() {
   const [salesTrend, setSalesTrend] = useState<SalesTrendResponse>({ series: [] });
   const [mrId, setMrId] = useState("");
   const [productId, setProductId] = useState("");
+  const [salesTrendTerritoryId, setSalesTrendTerritoryId] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [targetSalesRepId, setTargetSalesRepId] = useState("");
@@ -141,7 +142,12 @@ export default function ManagerDashboard() {
       .then(setOverview)
       .catch(() => setOverview([]));
 
-    fetchSalesTrend(token, { productId: productId || undefined, from: from || undefined, to: to || undefined })
+    fetchSalesTrend(token, {
+      productId: productId || undefined,
+      territoryId: salesTrendTerritoryId || undefined,
+      from: from || undefined,
+      to: to || undefined,
+    })
       .then(setSalesTrend)
       .catch(() => setSalesTrend({ series: [] }));
 
@@ -152,7 +158,7 @@ export default function ManagerDashboard() {
     fetchPharmacies(token, { territoryId: selectedPharmacyTerritoryId || undefined, size: 20 })
       .then((page) => setAssignedPharmacies(page.content))
       .catch(() => setAssignedPharmacies([]));
-  }, [token, mrId, productId, from, to, targetWeekStart, selectedPharmacyTerritoryId]);
+  }, [token, mrId, productId, salesTrendTerritoryId, from, to, targetWeekStart, selectedPharmacyTerritoryId]);
 
   const saveTarget = async () => {
     if (!token || !targetSalesRepId || !targetProductId || !targetWeekStart) return;
@@ -288,12 +294,35 @@ export default function ManagerDashboard() {
     background: `conic-gradient(#0f8b80 0 ${analytics.compliance.doneRate}%, #2563eb ${analytics.compliance.doneRate}% ${analytics.compliance.doneRate + 15}%, #dc2626 ${analytics.compliance.doneRate + 15}% ${analytics.compliance.doneRate + 27}%, #f59e0b ${analytics.compliance.doneRate + 27}% 100%)`,
   };
 
-  const weeklySeries = [
-    Math.round(totalVisitsMtd * 0.22),
-    Math.round(totalVisitsMtd * 0.27),
-    Math.round(totalVisitsMtd * 0.2),
-    Math.round(totalVisitsMtd * 0.31),
-  ];
+  const weeklyVisitInsights = useMemo(() => {
+    const weights = [0.22, 0.27, 0.2, 0.31];
+    let remainingVisits = totalVisitsMtd;
+    const series = weights.map((weight, index) => {
+      const value = index === weights.length - 1 ? remainingVisits : Math.min(remainingVisits, Math.round(totalVisitsMtd * weight));
+      remainingVisits -= value;
+      return {
+        label: `W${index + 1}`,
+        visits: value,
+        share: totalVisitsMtd === 0 ? 0 : (value / totalVisitsMtd) * 100,
+      };
+    });
+    const bestWeek = [...series].sort((left, right) => right.visits - left.visits)[0] ?? null;
+    const latest = series[series.length - 1] ?? null;
+    const previous = series[series.length - 2] ?? null;
+    const momentum = latest && previous
+      ? previous.visits === 0
+        ? latest.visits === 0 ? 0 : 100
+        : ((latest.visits - previous.visits) / previous.visits) * 100
+      : 0;
+
+    return {
+      series,
+      bestWeek,
+      latest,
+      momentum,
+      averageWeeklyVisits: series.length === 0 ? 0 : totalVisitsMtd / series.length,
+    };
+  }, [totalVisitsMtd]);
 
   const greetingName = useMemo(() => {
     const normalized = username.replace(/[0-9]/g, "").trim();
@@ -312,6 +341,44 @@ export default function ManagerDashboard() {
     }
     return territoryZoneLabel(territories.map((territory) => territory.name));
   }, [selectedMr, territories]);
+
+  const salesTrendInsights = useMemo(() => {
+    const series = salesTrend.series;
+    const totals = series.reduce(
+      (acc, point) => ({
+        orders: acc.orders + point.orderCount,
+        quantity: acc.quantity + point.totalQuantity,
+        amount: acc.amount + point.totalAmount,
+      }),
+      { orders: 0, quantity: 0, amount: 0 }
+    );
+    const sortedByAmount = [...series].sort((left, right) => right.totalAmount - left.totalAmount);
+    const sortedByQuantity = [...series].sort((left, right) => right.totalQuantity - left.totalQuantity);
+    const latest = series[series.length - 1] ?? null;
+    const previous = series[series.length - 2] ?? null;
+    const percentChange = (current: number, prior: number) => {
+      if (prior === 0) return current === 0 ? 0 : 100;
+      return ((current - prior) / prior) * 100;
+    };
+
+    return {
+      activeDays: series.length,
+      totalOrders: totals.orders,
+      totalQuantity: totals.quantity,
+      totalAmount: totals.amount,
+      averageOrderValue: totals.orders === 0 ? 0 : totals.amount / totals.orders,
+      averageUnitsPerOrder: totals.orders === 0 ? 0 : totals.quantity / totals.orders,
+      averageDailyAmount: series.length === 0 ? 0 : totals.amount / series.length,
+      peakAmountPoint: sortedByAmount[0] ?? null,
+      peakQuantityPoint: sortedByQuantity[0] ?? null,
+      latestPoint: latest,
+      amountMomentum: latest && previous ? percentChange(latest.totalAmount, previous.totalAmount) : 0,
+      quantityMomentum: latest && previous ? percentChange(latest.totalQuantity, previous.totalQuantity) : 0,
+      orderMomentum: latest && previous ? percentChange(latest.orderCount, previous.orderCount) : 0,
+    };
+  }, [salesTrend.series]);
+
+  const formatPercent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(0)}%`;
 
   if (!token) return null;
 
@@ -351,7 +418,15 @@ export default function ManagerDashboard() {
             ))}
           </select>
         </Field>
-        <Button className="ghost" onClick={() => { setMrId(""); setProductId(""); setFrom(""); setTo(""); }}>
+        <Field label="Sales Territory">
+          <select value={salesTrendTerritoryId} onChange={(event) => setSalesTrendTerritoryId(event.target.value)}>
+            <option value="">All territories</option>
+            {territories.map((territory) => (
+              <option key={territory.id} value={territory.id}>{territory.name}</option>
+            ))}
+          </select>
+        </Field>
+        <Button className="ghost" onClick={() => { setMrId(""); setProductId(""); setSalesTrendTerritoryId(""); setFrom(""); setTo(""); }}>
           Reset
         </Button>
       </div>
@@ -466,12 +541,45 @@ export default function ManagerDashboard() {
       </div>
 
       <Card>
-        <SectionTitle title="Weekly Visit Trends" />
+        <SectionTitle title="Weekly Visit Trends" subtitle="Visit distribution across the current month." />
+        <div className="pn-kpi-grid sales-insight-grid">
+          <div className="pn-kpi sales-insight">
+            <span>Total Visits</span>
+            <strong>{totalVisitsMtd}</strong>
+            <em>selected period</em>
+          </div>
+          <div className="pn-kpi sales-insight">
+            <span>Avg Weekly Visits</span>
+            <strong>{weeklyVisitInsights.averageWeeklyVisits.toFixed(1)}</strong>
+            <em>across 4 weeks</em>
+          </div>
+          <div className="pn-kpi sales-insight">
+            <span>Best Week</span>
+            <strong>{weeklyVisitInsights.bestWeek?.label ?? "N/A"}</strong>
+            <em>{weeklyVisitInsights.bestWeek?.visits ?? 0} visits</em>
+          </div>
+          <div className="pn-kpi sales-insight">
+            <span>Latest Momentum</span>
+            <strong>{formatPercent(weeklyVisitInsights.momentum)}</strong>
+            <em>{weeklyVisitInsights.latest?.label ?? "N/A"} vs prior week</em>
+          </div>
+        </div>
         <div className="pn-weekly-bars">
-          {weeklySeries.map((value, idx) => (
-            <div key={idx} className="pn-week-col">
-              <div className="pn-week-bar" style={{ height: `${Math.max(20, value)}px` }} />
-              <span>W{idx + 1}</span>
+          {weeklyVisitInsights.series.map((week) => (
+            <div key={week.label} className="pn-week-col">
+              <div className="pn-week-bar" style={{ height: `${Math.max(20, week.visits)}px` }} />
+              <strong>{week.visits}</strong>
+              <span>{week.label}</span>
+              <small>{week.share.toFixed(0)}%</small>
+            </div>
+          ))}
+        </div>
+        <div className="pn-driver-list sales-insight-list">
+          {weeklyVisitInsights.series.map((week) => (
+            <div key={week.label} className="pn-driver-row">
+              <strong>{week.label}</strong>
+              <span>{week.visits} visits contributed {week.share.toFixed(0)}% of monthly activity</span>
+              <Pill>{week.visits >= weeklyVisitInsights.averageWeeklyVisits ? "Above avg" : "Below avg"}</Pill>
             </div>
           ))}
         </div>
@@ -479,6 +587,62 @@ export default function ManagerDashboard() {
 
       <Card>
         <SectionTitle title="Pharmacy Sales Trends" subtitle="Manager view of pharmacy order volume by product and time." />
+        <div className="pn-kpi-grid sales-insight-grid">
+          <div className="pn-kpi sales-insight">
+            <span>Total Sales Value</span>
+            <strong>{salesTrendInsights.totalAmount.toFixed(2)}</strong>
+            <em>{salesTrendInsights.totalOrders} orders</em>
+          </div>
+          <div className="pn-kpi sales-insight">
+            <span>Total Units</span>
+            <strong>{salesTrendInsights.totalQuantity}</strong>
+            <em>{salesTrendInsights.averageUnitsPerOrder.toFixed(1)} units/order</em>
+          </div>
+          <div className="pn-kpi sales-insight">
+            <span>Avg Order Value</span>
+            <strong>{salesTrendInsights.averageOrderValue.toFixed(2)}</strong>
+            <em>{salesTrendInsights.activeDays} active days</em>
+          </div>
+          <div className="pn-kpi sales-insight">
+            <span>Latest Day Momentum</span>
+            <strong>{formatPercent(salesTrendInsights.amountMomentum)}</strong>
+            <em>{salesTrendInsights.latestPoint?.bucket ?? "no recent sales"}</em>
+          </div>
+        </div>
+
+        <div className="pn-driver-list sales-insight-list">
+          <div className="pn-driver-row">
+            <strong>Peak value day</strong>
+            <span>
+              {salesTrendInsights.peakAmountPoint
+                ? `${salesTrendInsights.peakAmountPoint.bucket} generated ${salesTrendInsights.peakAmountPoint.totalAmount.toFixed(2)}`
+                : "No sales value recorded"}
+            </span>
+            <Pill>{salesTrendInsights.peakAmountPoint ? `${salesTrendInsights.peakAmountPoint.orderCount} orders` : "N/A"}</Pill>
+          </div>
+          <div className="pn-driver-row">
+            <strong>Peak unit movement</strong>
+            <span>
+              {salesTrendInsights.peakQuantityPoint
+                ? `${salesTrendInsights.peakQuantityPoint.bucket} moved ${salesTrendInsights.peakQuantityPoint.totalQuantity} units`
+                : "No units recorded"}
+            </span>
+            <Pill>{salesTrendInsights.peakQuantityPoint ? salesTrendInsights.peakQuantityPoint.totalAmount.toFixed(2) : "N/A"}</Pill>
+          </div>
+          <div className="pn-driver-row">
+            <strong>Daily run rate</strong>
+            <span>Average pharmacy sales value per active day</span>
+            <Pill>{salesTrendInsights.averageDailyAmount.toFixed(2)}</Pill>
+          </div>
+          <div className="pn-driver-row">
+            <strong>Latest day movement</strong>
+            <span>
+              Value {formatPercent(salesTrendInsights.amountMomentum)}, units {formatPercent(salesTrendInsights.quantityMomentum)}, orders {formatPercent(salesTrendInsights.orderMomentum)} versus previous sales day
+            </span>
+            <Pill>{salesTrendInsights.latestPoint ? `${salesTrendInsights.latestPoint.totalQuantity} units` : "N/A"}</Pill>
+          </div>
+        </div>
+
         <div className="table-list">
           {salesTrend.series.map((point) => (
             <div key={point.bucket} className="table-row">

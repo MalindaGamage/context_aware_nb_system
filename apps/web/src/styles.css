@@ -1021,6 +1021,16 @@ button.accent {
   font-size: 18px;
 }
 
+.pn-visit-quick-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dce6ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
 .pn-destination-list {
   display: grid;
   gap: 10px;
@@ -1263,9 +1273,33 @@ button.accent {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.sales-territory-label {
+  font-size: 30px;
+  line-height: 1.1;
+}
+
 .sales-workspace-grid {
   grid-template-columns: minmax(320px, 1.05fr) minmax(460px, 1.4fr);
   align-items: stretch;
+}
+
+.sales-insight-grid {
+  margin-bottom: 12px;
+}
+
+.sales-insight {
+  padding: 12px;
+  border: 1px solid #e1e8ee;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.sales-insight strong {
+  font-size: 28px;
+}
+
+.sales-insight-list {
+  margin-bottom: 14px;
 }
 
 .sales-brands-card,
@@ -1277,6 +1311,49 @@ button.accent {
   display: grid;
   align-content: start;
   gap: 14px;
+}
+
+.sales-pharmacy-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.sales-pharmacy-group {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e1e8ee;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.sales-pharmacy-group-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.sales-pharmacy-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sales-pharmacy-option {
+  border: 1px solid #cbd5f5;
+  border-radius: 999px;
+  background: white;
+  color: #0f172a;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sales-pharmacy-option.active {
+  border-color: #0f8b80;
+  background: #0f8b80;
+  color: white;
 }
 
 .pn-territory-line {
@@ -1410,7 +1487,7 @@ button.accent {
 
 .pn-territory-kpis {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 
@@ -1449,7 +1526,7 @@ button.accent {
 
 .pn-territory-assign {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
@@ -1597,6 +1674,7 @@ button.accent {
   .pn-kpi-grid,
   .pn-manager-grid,
   .pn-territory-grid,
+  .pn-territory-assign,
   .pn-directory-filters,
   .pn-map-layout,
   .pn-map-info-grid {

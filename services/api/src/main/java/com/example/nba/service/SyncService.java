@@ -36,7 +36,7 @@ public class SyncService {
     this.doctorService = doctorService;
   }
 
-  @Transactional
+  @Transactional(noRollbackFor = ResponseStatusException.class)
   public SyncBatchResponse syncBatch(UUID userId, boolean enforceMrScope, SyncBatchRequest request) {
     SyncConflictStrategy strategy = request.strategy();
     List<SyncItemResult> visitResults = new ArrayList<>();
@@ -49,11 +49,33 @@ public class SyncService {
     }
 
     for (SyncFeedbackRequest feedbackRequest : nullSafe(request.feedback())) {
-      RecommendationFeedbackService.SyncOutcome outcome = recommendationFeedbackService.syncFeedback(
-          feedbackRequest,
-          userId,
-          enforceMrScope,
-          strategy);
+      SyncItemResult rejected = null;
+      RecommendationFeedbackService.SyncOutcome outcome = null;
+      try {
+        outcome = recommendationFeedbackService.syncFeedback(
+            feedbackRequest,
+            userId,
+            enforceMrScope,
+            strategy);
+      } catch (ResponseStatusException ex) {
+        String clientRef = feedbackRequest.clientReferenceId() == null ? "" : feedbackRequest.clientReferenceId();
+        String message = ex.getReason() == null ? "Feedback could not be synced" : ex.getReason();
+        conflicts.add(new SyncConflict(
+            "feedback",
+            clientRef,
+            feedbackRequest.recommendationId() == null ? "" : feedbackRequest.recommendationId().toString(),
+            message));
+        rejected = new SyncItemResult(
+            clientRef,
+            "REJECTED",
+            feedbackRequest.recommendationId() == null ? "" : feedbackRequest.recommendationId().toString(),
+            message);
+      }
+
+      if (rejected != null) {
+        feedbackResults.add(rejected);
+        continue;
+      }
 
       if (outcome.conflict()) {
         conflicts.add(new SyncConflict(
