@@ -756,28 +756,28 @@ export default function ManagerDashboard() {
       <div className="pn-manager-grid">
         <Card>
           <SectionTitle title="Coaching Summary" subtitle="Day-plan usage, work-window adherence, and overdue reschedules." />
-          <div className="pn-driver-list">
-            <div className="pn-driver-row">
+          <div className="manager-coaching-list">
+            <div className="manager-coaching-row">
               <strong>Configured day plans</strong>
               <span>{analytics.coachingSummary.configuredScheduleCount} of {analytics.coachingSummary.totalMrCount} MRs</span>
               <Pill>{analytics.coachingSummary.scheduleCoverageRate.toFixed(0)}%</Pill>
             </div>
-            <div className="pn-driver-row">
+            <div className="manager-coaching-row">
               <strong>Visits inside work windows</strong>
               <span>Share of visits logged within MR workday minus break windows</span>
               <Pill>{analytics.coachingSummary.workdayVisitRate.toFixed(0)}%</Pill>
             </div>
-            <div className="pn-driver-row">
+            <div className="manager-coaching-row">
               <strong>Average day-plan adherence</strong>
               <span>Average visit volume against each MR's planned daily capacity</span>
               <Pill>{analytics.coachingSummary.planAdherenceRate.toFixed(0)}%</Pill>
             </div>
-            <div className="pn-driver-row">
+            <div className="manager-coaching-row">
               <strong>Overdue reschedules</strong>
               <span>Recommendations that were rescheduled but are now past due</span>
               <Pill>{analytics.coachingSummary.overdueReschedules}</Pill>
             </div>
-            <div className="pn-driver-row">
+            <div className="manager-coaching-row">
               <strong>At-risk MRs</strong>
               <span>Missing plans, low work-window adherence, or overdue follow-up load</span>
               <Pill>{analytics.coachingSummary.atRiskMrCount}</Pill>

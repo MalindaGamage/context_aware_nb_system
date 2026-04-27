@@ -1876,6 +1876,46 @@ button.accent {
   width: 100%;
 }
 
+.manager-coaching-list {
+  display: grid;
+  gap: 8px;
+}
+
+.manager-coaching-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label metric"
+    "description description";
+  column-gap: 12px;
+  row-gap: 5px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #e8eef3;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.manager-coaching-row strong {
+  grid-area: label;
+  color: #0a0f1a;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.manager-coaching-row > span {
+  grid-area: description;
+  color: #60798e;
+  font-size: 12px;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.manager-coaching-row .pill {
+  grid-area: metric;
+  justify-self: end;
+}
+
 .sales-page {
   align-content: start;
 }
