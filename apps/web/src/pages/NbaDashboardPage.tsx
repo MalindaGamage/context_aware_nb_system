@@ -263,6 +263,7 @@ export default function NbaDashboardPage() {
   const [mapError, setMapError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchAnchor, setSearchAnchor] = useState<LatLngLiteral | null>(null);
+  const [doctorSearchQuery, setDoctorSearchQuery] = useState("");
   const [now, setNow] = useState(() => new Date());
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -433,6 +434,12 @@ export default function NbaDashboardPage() {
       return leftDistance - rightDistance;
     });
   }, [currentPosition, mapDoctors, mapPharmacyAccounts, pharmacies]);
+
+  const filteredDestinations = useMemo(() => {
+    if (!doctorSearchQuery.trim()) return destinations;
+    const q = doctorSearchQuery.toLowerCase();
+    return destinations.filter((d) => d.name.toLowerCase().includes(q));
+  }, [destinations, doctorSearchQuery]);
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
@@ -1478,6 +1485,13 @@ export default function NbaDashboardPage() {
             <h2>Nearby Destinations</h2>
             <Pill>Doctors + pharmacies</Pill>
           </div>
+          <div className="pn-destination-search">
+            <input
+              value={doctorSearchQuery}
+              onChange={(e) => setDoctorSearchQuery(e.target.value)}
+              placeholder="Search doctor or pharmacy name..."
+            />
+          </div>
           <div className="pn-map-info">
             <strong>Fastest Commutes</strong>
             <div className="pn-commute-list">
@@ -1497,7 +1511,7 @@ export default function NbaDashboardPage() {
             </div>
           </div>
           <div className="pn-destination-list">
-            {destinations.slice(0, 12).map((destination) => (
+            {filteredDestinations.slice(0, 12).map((destination) => (
               <button
                 key={destination.id}
                 type="button"
@@ -1518,6 +1532,9 @@ export default function NbaDashboardPage() {
               <p className="muted">
                 No mapped doctors or pharmacies yet. Ensure doctor latitude and longitude exist, then add a Google Maps key.
               </p>
+            )}
+            {destinations.length > 0 && filteredDestinations.length === 0 && (
+              <p className="muted">No doctors or pharmacies match "{doctorSearchQuery}".</p>
             )}
           </div>
         </Card>

@@ -1327,6 +1327,73 @@ button.accent {
   background: #f8fafc;
 }
 
+/* Doctor map view */
+.doctor-map-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.doctor-map-svg {
+  border: 1px solid #e1e8ee;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f0f7ff 0%, #e8f8f6 100%);
+  display: block;
+}
+
+.doctor-map-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.map-legend-item.met { color: #14965e; }
+.map-legend-item.not-met { color: #94a3b8; }
+
+/* Met / Not Met badges in list and detail */
+.met-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1.5px solid;
+  white-space: nowrap;
+}
+
+.met-badge.met {
+  color: #14965e;
+  border-color: #14965e;
+  background: #e7f7ef;
+}
+
+.met-badge.not-met {
+  color: #64748b;
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+
+.list-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.color-met { color: #14965e; }
+.color-not-met { color: #64748b; }
+
+/* NBA field map destination search */
+.pn-destination-search {
+  padding: 0 0 10px;
+}
+
+.pn-destination-search input {
+  width: 100%;
+}
+
 .sales-pharmacy-group-head {
   display: flex;
   justify-content: space-between;

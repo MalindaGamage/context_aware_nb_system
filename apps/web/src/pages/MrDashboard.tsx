@@ -5,6 +5,7 @@ import {
   fetchDoctorVisits,
   fetchDoctors,
   fetchMyTerritories,
+  fetchMyVisits,
   fetchNearbyDoctors,
   fetchNbaNext,
   fetchSecurePing,
@@ -34,6 +35,68 @@ import {
   saveConflicts,
 } from "../offline/queue";
 import { Badge, Button, Card, Field, Pill, SectionTitle } from "../ui/components";
+
+function DoctorMapView({
+  doctors,
+  visitedIds,
+  selectedId,
+  onSelect,
+}: {
+  doctors: Doctor[];
+  visitedIds: Set<string>;
+  selectedId: string | null;
+  onSelect: (doc: Doctor) => void;
+}) {
+  const W = 520, H = 300, PAD = 30;
+  const withCoords = doctors.filter((d): d is Doctor & { lat: number; lon: number } => d.lat != null && d.lon != null);
+
+  if (withCoords.length === 0) {
+    return <p className="muted">No location data available for these doctors.</p>;
+  }
+
+  const lats = withCoords.map((d) => d.lat);
+  const lons = withCoords.map((d) => d.lon);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+  const rangeW = maxLon - minLon || 0.01;
+  const rangeH = maxLat - minLat || 0.01;
+  const single = withCoords.length === 1;
+  const toX = (lon: number) => (single ? W / 2 : PAD + ((lon - minLon) / rangeW) * (W - 2 * PAD));
+  const toY = (lat: number) => (single ? H / 2 : H - PAD - ((lat - minLat) / rangeH) * (H - 2 * PAD));
+
+  return (
+    <div className="doctor-map-wrap">
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="doctor-map-svg">
+        {withCoords.map((doc) => {
+          const met = visitedIds.has(doc.id);
+          const selected = doc.id === selectedId;
+          const cx = toX(doc.lon);
+          const cy = toY(doc.lat);
+          return (
+            <g key={doc.id} onClick={() => onSelect(doc)} style={{ cursor: "pointer" }}>
+              <circle
+                cx={cx} cy={cy}
+                r={selected ? 13 : 9}
+                fill={met ? "#dcfce7" : "#f1f5f9"}
+                stroke={selected ? "#0f6f9a" : met ? "#14965e" : "#94a3b8"}
+                strokeWidth={selected ? 2.5 : 1.5}
+              />
+              <text x={cx} y={cy + 4} textAnchor="middle" fontSize="9" fill={met ? "#14965e" : "#64748b"} fontWeight="700" style={{ pointerEvents: "none" }}>
+                {met ? "✓" : "–"}
+              </text>
+              <title>{doc.fullName} — {met ? "Met" : "Not Met"}</title>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="doctor-map-legend">
+        <span className="map-legend-item met">● Met</span>
+        <span className="map-legend-item not-met">○ Not Met</span>
+        <span className="muted" style={{ fontSize: 11 }}>{withCoords.length} of {doctors.length} doctors have location data · click a pin to select</span>
+      </div>
+    </div>
+  );
+}
 
 const VISIT_DRAFT_PREFIX = "nba_visit_draft";
 
@@ -74,12 +137,16 @@ export default function MrDashboard() {
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [status, setStatus] = useState("");
   const [draftLoadedForDoctorId, setDraftLoadedForDoctorId] = useState("");
+  const [nameSearch, setNameSearch] = useState("");
+  const [visitedDoctorIds, setVisitedDoctorIds] = useState<Set<string>>(new Set());
+  const [mapView, setMapView] = useState(false);
 
   useEffect(() => {
     if (!token) return;
     fetchMyTerritories(token).then(setMyTerritories).catch(() => setMyTerritories([]));
     void refreshOfflineState();
     void loadNextActions(token);
+    void loadVisitedDoctors(token);
   }, [token]);
 
   const activeTerritoryId = useMemo(() => {
@@ -107,6 +174,14 @@ export default function MrDashboard() {
     });
     return [...filtered].sort((a, b) => b.priorityScore - a.priorityScore);
   }, [doctors, priorityBand]);
+
+  const displayedDoctors = useMemo(() => {
+    if (!nameSearch.trim()) return segmentedDoctors;
+    const q = nameSearch.toLowerCase();
+    return segmentedDoctors.filter(
+      (d) => d.fullName.toLowerCase().includes(q) || (d.specialty ?? "").toLowerCase().includes(q)
+    );
+  }, [segmentedDoctors, nameSearch]);
 
   useEffect(() => {
     if (!selectedDoctor) return;
@@ -203,6 +278,15 @@ export default function MrDashboard() {
     setQueuedFeedbackCount(breakdown.feedback);
   };
 
+  const loadVisitedDoctors = async (authToken: string) => {
+    try {
+      const result = await fetchMyVisits(authToken, 0, 200);
+      setVisitedDoctorIds(new Set(result.content.map((v) => v.doctorId)));
+    } catch {
+      // non-critical — met status will show as unknown
+    }
+  };
+
   const refreshSelectedDoctorVisits = async () => {
     if (!token || !selectedDoctor) return;
     const result = await fetchDoctorVisits(token, selectedDoctor.id, 0, 10);
@@ -246,6 +330,7 @@ export default function MrDashboard() {
       setFollowUpRequired(false);
       setVisitTime(new Date().toISOString().slice(0, 16));
       setStatus("Visit logged");
+      setVisitedDoctorIds((prev) => { const next = new Set(prev); next.add(selectedDoctor.id); return next; });
       await refreshSelectedDoctorVisits();
     } catch {
       await queueVisit(payload);
@@ -316,6 +401,7 @@ export default function MrDashboard() {
       }
       await refreshSelectedDoctorVisits();
       await loadNextActions(authToken);
+      await loadVisitedDoctors(authToken);
     } catch {
       setStatus("Batch sync failed");
     }
@@ -557,6 +643,9 @@ export default function MrDashboard() {
       <Card>
         <SectionTitle title="Doctor Directory" subtitle="Segment by tier, priority, specialty, and location." />
         <div className="filters">
+          <Field label="Search">
+            <input placeholder="Name or specialty..." value={nameSearch} onChange={(e) => setNameSearch(e.target.value)} />
+          </Field>
           <Field label="Tier">
             <input placeholder="A / B" value={tier} onChange={(e) => setTier(e.target.value)} />
           </Field>
@@ -595,21 +684,40 @@ export default function MrDashboard() {
         </div>
         <div className="chips">
           <Pill>Mode: {locationSegment === "NEARBY" ? "Nearby" : "Assigned territory"}</Pill>
-          <Pill>Doctors: {segmentedDoctors.length}</Pill>
+          <Pill>Showing: {displayedDoctors.length}</Pill>
+          <button className={`pn-chip-btn${!mapView ? " active" : ""}`} onClick={() => setMapView(false)}>List</button>
+          <button className={`pn-chip-btn${mapView ? " active" : ""}`} onClick={() => setMapView(true)}>Map</button>
         </div>
 
         <div className="grid">
           <div className="list">
-            {segmentedDoctors.map((doc) => (
-              <button key={doc.id} className="list-item" onClick={() => setSelectedDoctor(doc)}>
-                <div>
-                  <strong>{doc.fullName}</strong>
-                  <span>{doc.specialty || "General"}</span>
-                </div>
-                <Pill>Tier {doc.tier} | P{doc.priorityScore}</Pill>
-              </button>
-            ))}
-            {segmentedDoctors.length === 0 && <p className="muted">No doctors match the current segmentation.</p>}
+            {mapView ? (
+              <DoctorMapView
+                doctors={displayedDoctors}
+                visitedIds={visitedDoctorIds}
+                selectedId={selectedDoctor?.id ?? null}
+                onSelect={setSelectedDoctor}
+              />
+            ) : (
+              <>
+                {displayedDoctors.map((doc) => {
+                  const met = visitedDoctorIds.has(doc.id);
+                  return (
+                    <button key={doc.id} className="list-item" onClick={() => setSelectedDoctor(doc)}>
+                      <div>
+                        <strong>{doc.fullName}</strong>
+                        <span>{doc.specialty || "General"}</span>
+                      </div>
+                      <div className="list-item-right">
+                        <span className={`met-badge ${met ? "met" : "not-met"}`}>{met ? "✓ Met" : "Not Met"}</span>
+                        <Pill>Tier {doc.tier} | P{doc.priorityScore}</Pill>
+                      </div>
+                    </button>
+                  );
+                })}
+                {displayedDoctors.length === 0 && <p className="muted">No doctors match the current filters.</p>}
+              </>
+            )}
           </div>
           <div className="detail">
             {selectedDoctor ? (
@@ -624,6 +732,12 @@ export default function MrDashboard() {
                   <div>
                     <span>Priority</span>
                     <strong>{selectedDoctor.priorityScore}</strong>
+                  </div>
+                  <div>
+                    <span>Visit Status</span>
+                    <strong className={visitedDoctorIds.has(selectedDoctor.id) ? "color-met" : "color-not-met"}>
+                      {visitedDoctorIds.has(selectedDoctor.id) ? "Met ✓" : "Not Met"}
+                    </strong>
                   </div>
                 </div>
                 <p className="notes">{selectedDoctor.notes || "No notes yet."}</p>
