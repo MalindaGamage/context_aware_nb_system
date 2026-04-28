@@ -75,6 +75,19 @@ public class VisitController {
     return visitService.captureGps(visitId, request, UUID.fromString(jwt.getSubject()), isMr(jwt));
   }
 
+  @PreAuthorize("hasAnyAuthority('ROLE_MANAGER','ROLE_ADMIN')")
+  @GetMapping("/api/v1/users/{userId}/visits")
+  public PageResponse<VisitResponse> listUserVisits(
+      @PathVariable UUID userId,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "20") int size) {
+    Pageable pageable = PageRequest.of(page, size);
+    Page<VisitResponse> result = visitService.listUserVisits(userId, pageable);
+    return new PageResponse<>(
+        result.getContent(),
+        new PageMeta(result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
+  }
+
   @PreAuthorize("hasAnyAuthority('ROLE_MR','ROLE_MANAGER','ROLE_ADMIN')")
   @GetMapping("/api/v1/doctors/{doctorId}/visits")
   public PageResponse<VisitResponse> listDoctorVisits(@PathVariable UUID doctorId,

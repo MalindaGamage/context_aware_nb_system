@@ -4,11 +4,15 @@ import com.example.nba.dto.CaptureVisitGpsRequest;
 import com.example.nba.dto.CreateVisitRequest;
 import com.example.nba.dto.UpdateVisitRequest;
 import com.example.nba.dto.VisitResponse;
+import com.example.nba.entity.Doctor;
 import com.example.nba.entity.Visit;
+import com.example.nba.repository.DoctorRepository;
 import com.example.nba.repository.VisitRepository;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.PrecisionModel;
@@ -26,13 +30,16 @@ public class VisitService {
   private static final int MAX_NOTES_LENGTH = 2000;
 
   private final VisitRepository visitRepository;
+  private final DoctorRepository doctorRepository;
   private final DoctorService doctorService;
   private final AuditLogService auditLogService;
 
   public VisitService(VisitRepository visitRepository,
+                      DoctorRepository doctorRepository,
                       DoctorService doctorService,
                       AuditLogService auditLogService) {
     this.visitRepository = visitRepository;
+    this.doctorRepository = doctorRepository;
     this.doctorService = doctorService;
     this.auditLogService = auditLogService;
   }
@@ -73,6 +80,14 @@ public class VisitService {
 
   public Page<VisitResponse> listMyVisits(UUID actorUserId, Pageable pageable) {
     return visitRepository.findByUserIdOrderByVisitTimeDesc(actorUserId, pageable).map(this::toResponse);
+  }
+
+  public Page<VisitResponse> listUserVisits(UUID targetUserId, Pageable pageable) {
+    Page<Visit> page = visitRepository.findByUserIdOrderByVisitTimeDesc(targetUserId, pageable);
+    Set<UUID> doctorIds = page.getContent().stream().map(Visit::getDoctorId).collect(Collectors.toSet());
+    Map<UUID, String> nameMap = doctorRepository.findAllById(doctorIds).stream()
+        .collect(Collectors.toMap(Doctor::getId, Doctor::getFullName));
+    return page.map(v -> toResponse(v, nameMap.get(v.getDoctorId())));
   }
 
   public Page<VisitResponse> listDoctorVisits(UUID doctorId, UUID actorUserId, boolean enforceMrScope, Pageable pageable) {
@@ -187,9 +202,14 @@ public class VisitService {
   }
 
   private VisitResponse toResponse(Visit visit) {
+    return toResponse(visit, null);
+  }
+
+  private VisitResponse toResponse(Visit visit, String doctorName) {
     return new VisitResponse(
         visit.getId(),
         visit.getDoctorId(),
+        doctorName,
         visit.getUserId(),
         visit.getVisitTime(),
         visit.getOutcome(),

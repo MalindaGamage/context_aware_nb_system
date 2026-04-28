@@ -265,6 +265,7 @@ export default function NbaDashboardPage() {
   const [selectedPlaceDetails, setSelectedPlaceDetails] = useState<PlaceDetailsSummary | null>(null);
   const [commuteSummaries, setCommuteSummaries] = useState<CommuteSummary[]>([]);
   const [mapError, setMapError] = useState("");
+  const [activeTab, setActiveTab] = useState<"actions" | "map" | "plan" | "pharmacy">("actions");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchAnchor, setSearchAnchor] = useState<LatLngLiteral | null>(null);
   const [doctorSearchQuery, setDoctorSearchQuery] = useState("");
@@ -1046,6 +1047,13 @@ export default function NbaDashboardPage() {
     }
   };
 
+  useEffect(() => {
+    if (activeTab === "map" && mapRef.current) {
+      const timer = window.setTimeout(() => mapRef.current?.invalidateSize(), 50);
+      return () => window.clearTimeout(timer);
+    }
+  }, [activeTab]);
+
   const handleLocationSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const map = mapRef.current;
@@ -1156,6 +1164,26 @@ export default function NbaDashboardPage() {
         <Card><div className="pn-kpi"><span>NBA Acceptance</span><strong>{acceptanceRate || 89}%</strong><em>rate</em></div></Card>
       </div>
 
+      <div className="pn-tab-bar" role="tablist">
+        {(["actions", "map", "plan", "pharmacy"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={`pn-tab-btn${activeTab === tab ? " active" : ""}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab === "actions" && "NBA Actions"}
+            {tab === "map" && "Field Map"}
+            {tab === "plan" && "Day Plan"}
+            {tab === "pharmacy" && "Pharmacy"}
+          </button>
+        ))}
+      </div>
+
+      {/* Field Map tab — kept mounted so Leaflet retains state; hidden via CSS when inactive */}
+      <div style={{ display: activeTab === "map" ? "" : "none" }}>
       <div className="pn-map-layout">
         <Card className="pn-map-card">
           <div className="pn-map-head">
@@ -1410,7 +1438,9 @@ export default function NbaDashboardPage() {
           </div>
         </Card>
       </div>
+      </div>{/* end Field Map tab wrapper */}
 
+      {activeTab === "plan" && (
       <div className="pn-plan-layout">
         <Card>
           <div className="pn-section-head">
@@ -1508,7 +1538,9 @@ export default function NbaDashboardPage() {
           </div>
         </Card>
       </div>
+      )}{/* end Day Plan tab */}
 
+      {activeTab === "pharmacy" && (
       <div className="pn-plan-layout">
         <Card>
           <div className="pn-section-head">
@@ -1610,7 +1642,9 @@ export default function NbaDashboardPage() {
           </div>
         </Card>
       </div>
+      )}{/* end Pharmacy tab */}
 
+      {activeTab === "actions" && (
       <div className="pn-nba-section">
         <div className="pn-section-head">
           <h2>Next Best Actions</h2>
@@ -1729,6 +1763,7 @@ export default function NbaDashboardPage() {
       </div>
 
       </div>
+      )}{/* end NBA Actions tab */}
 
       <div className="pn-offline-status">
         <Pill>Queued visits: {queuedVisits}</Pill>

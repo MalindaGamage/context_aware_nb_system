@@ -9,6 +9,8 @@ import {
   fetchMrSummaries,
   fetchTerritories,
   fetchTerritoryOverview,
+  fetchUserVisits,
+  fetchUserAssignedProducts,
   importGooglePharmacy,
   upsertSalesTarget,
   type ProductSummary,
@@ -19,11 +21,14 @@ import {
   type TerritoryOverview,
   type Territory,
   type UserProfile,
+  type UserProductAssignment,
   type UserSummary,
+  type Visit,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { greetingLine, territoryZoneLabel } from "../lib/greeting";
-import { searchNominatimPharmacies } from "../lib/nominatim";
+import { searchPharmaciesByName } from "../lib/overpassPharmacy";
+import { geocodeAddress } from "../lib/nominatim";
 import { Button, Card, Field, Pill, SectionTitle } from "../ui/components";
 
 const defaultAnalytics: ManagerAnalyticsResponse = {
@@ -97,13 +102,23 @@ export default function ManagerDashboard() {
   });
   const [targetQuantity, setTargetQuantity] = useState("0");
   const [targetAmount, setTargetAmount] = useState("0");
+  const [activeTab, setActiveTab] = useState<"overview" | "targets" | "sales" | "pharmacy" | "coaching">("overview");
   const [pharmacySearch, setPharmacySearch] = useState("");
   const [googlePharmacyResults, setGooglePharmacyResults] = useState<GooglePlaceCandidate[]>([]);
   const [selectedGooglePlaceId, setSelectedGooglePlaceId] = useState("");
   const [selectedPharmacyTerritoryId, setSelectedPharmacyTerritoryId] = useState("");
   const [pharmacySearchStatus, setPharmacySearchStatus] = useState("");
+  const [pharmacyInputMode, setPharmacyInputMode] = useState<"search" | "manual">("search");
+  const [manualName, setManualName] = useState("");
+  const [manualAddress, setManualAddress] = useState("");
+  const [manualLat, setManualLat] = useState("");
+  const [manualLng, setManualLng] = useState("");
+  const [manualStatus, setManualStatus] = useState("");
   const [status, setStatus] = useState("");
   const [now, setNow] = useState(() => new Date());
+  const [mrVisits, setMrVisits] = useState<Visit[]>([]);
+  const [mrVisitsLoading, setMrVisitsLoading] = useState(false);
+  const [srProducts, setSrProducts] = useState<UserProductAssignment[]>([]);
 
   useEffect(() => {
     if (!token) return;
@@ -160,6 +175,22 @@ export default function ManagerDashboard() {
       .catch(() => setAssignedPharmacies([]));
   }, [token, mrId, productId, salesTrendTerritoryId, from, to, targetWeekStart, selectedPharmacyTerritoryId]);
 
+  useEffect(() => {
+    if (!token || !mrId) { setMrVisits([]); return; }
+    setMrVisitsLoading(true);
+    fetchUserVisits(token, mrId, 0, 30)
+      .then((page) => setMrVisits(page.content))
+      .catch(() => setMrVisits([]))
+      .finally(() => setMrVisitsLoading(false));
+  }, [token, mrId]);
+
+  useEffect(() => {
+    if (!token || !targetSalesRepId) { setSrProducts([]); return; }
+    fetchUserAssignedProducts(token, targetSalesRepId)
+      .then(setSrProducts)
+      .catch(() => setSrProducts([]));
+  }, [token, targetSalesRepId]);
+
   const saveTarget = async () => {
     if (!token || !targetSalesRepId || !targetProductId || !targetWeekStart) return;
     try {
@@ -187,28 +218,79 @@ export default function ManagerDashboard() {
 
   const searchGooglePlaces = async () => {
     if (!pharmacySearch.trim()) {
-      setPharmacySearchStatus("Enter a pharmacy name or area to search");
+      setPharmacySearchStatus("Enter a pharmacy name to search");
       return;
     }
     try {
-      setPharmacySearchStatus("Searching OpenStreetMap...");
-      const results = await searchNominatimPharmacies(pharmacySearch.trim());
+      setPharmacySearchStatus("Searching OpenStreetMap by name...");
+      const results = await searchPharmaciesByName(pharmacySearch.trim());
       const candidates: GooglePlaceCandidate[] = results.map((item) => ({
-        placeId: item.osmId,
+        placeId: item.id,
         name: item.name,
         address: item.address,
         lat: item.lat,
-        lon: item.lon,
+        lon: item.lng,
       }));
       setGooglePharmacyResults(candidates);
       setSelectedGooglePlaceId(candidates[0]?.placeId || "");
       setPharmacySearchStatus(
-        candidates.length === 0 ? "No pharmacies found on OpenStreetMap" : `${candidates.length} pharmacies found`
+        candidates.length === 0
+          ? "No pharmacies found — try a shorter or partial name (e.g. 'samaji' instead of 'samaji pharmacy')"
+          : `${candidates.length} pharmacies found on OpenStreetMap`
       );
     } catch {
       setGooglePharmacyResults([]);
       setSelectedGooglePlaceId("");
-      setPharmacySearchStatus("Failed to search OpenStreetMap pharmacies");
+      setPharmacySearchStatus("Failed to search — check your connection and try again");
+    }
+  };
+
+  const geocodeManualAddress = async () => {
+    if (!manualAddress.trim()) {
+      setManualStatus("Enter an address first");
+      return;
+    }
+    setManualStatus("Looking up coordinates…");
+    const result = await geocodeAddress(manualAddress.trim());
+    if (!result) {
+      setManualStatus("Address not found — enter coordinates manually");
+      return;
+    }
+    setManualLat(result.lat.toFixed(6));
+    setManualLng(result.lng.toFixed(6));
+    setManualStatus(`Coordinates found: ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)}`);
+  };
+
+  const saveManualPharmacy = async () => {
+    if (!token || !manualName.trim() || !selectedPharmacyTerritoryId) {
+      setManualStatus("Name and territory are required");
+      return;
+    }
+    const lat = parseFloat(manualLat);
+    const lng = parseFloat(manualLng);
+    if (manualLat && manualLng && (isNaN(lat) || isNaN(lng))) {
+      setManualStatus("Coordinates must be valid numbers");
+      return;
+    }
+    try {
+      setManualStatus("Saving…");
+      const saved = await importGooglePharmacy(token, {
+        googlePlaceId: `manual:${Date.now()}`,
+        name: manualName.trim(),
+        territoryId: selectedPharmacyTerritoryId,
+        address: manualAddress.trim() || undefined,
+        lat: manualLat ? lat : 0,
+        lon: manualLng ? lng : 0,
+      });
+      setManualStatus(`Saved ${saved.name}`);
+      setManualName("");
+      setManualAddress("");
+      setManualLat("");
+      setManualLng("");
+      const refreshed = await fetchPharmacies(token, { territoryId: selectedPharmacyTerritoryId, size: 20 });
+      setAssignedPharmacies(refreshed.content);
+    } catch {
+      setManualStatus("Failed to save pharmacy");
     }
   };
 
@@ -405,6 +487,26 @@ export default function ManagerDashboard() {
         <Card><div className="pn-kpi"><span>Day Plans Configured</span><strong>{coachingCoverage.toFixed(0)}%</strong><em>{analytics.coachingSummary.configuredScheduleCount}/{analytics.coachingSummary.totalMrCount} MRs</em></div></Card>
       </div>
 
+      <div className="pn-tab-bar" role="tablist">
+        {(["overview", "targets", "sales", "pharmacy", "coaching"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={`pn-tab-btn${activeTab === tab ? " active" : ""}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab === "overview" && "Overview"}
+            {tab === "targets" && "Targets"}
+            {tab === "sales" && "Sales"}
+            {tab === "pharmacy" && "Pharmacy"}
+            {tab === "coaching" && "Coaching"}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "targets" && (
       <div className="pn-manager-grid">
         <Card>
           <SectionTitle title="SR Weekly Targets" subtitle="Manager-set sales rep targets versus actual pharmacy sell-in." />
@@ -475,304 +577,411 @@ export default function ManagerDashboard() {
           {status && <p className="muted">{status}</p>}
         </Card>
       </div>
+      )}{/* end Targets grid */}
 
-      <div className="pn-manager-grid">
-        <Card>
-          <SectionTitle title="Territory Coverage" />
-          {overview.map((row) => {
-            const pct = row.doctorCount === 0 ? 0 : Math.round((row.visitCount / row.doctorCount) * 100);
-            return (
-              <div key={row.territoryId} className="pn-territory-line">
-                <div className="row-actions" style={{ justifyContent: "space-between" }}>
-                  <strong>{row.territoryName}</strong>
-                  <span className="muted">{pct}%</span>
+      {activeTab === "overview" && (
+        <div className="pn-manager-grid">
+          <Card>
+            <SectionTitle title="Territory Coverage" />
+            {overview.map((row) => {
+              const pct = row.doctorCount === 0 ? 0 : Math.round((row.visitCount / row.doctorCount) * 100);
+              return (
+                <div key={row.territoryId} className="pn-territory-line">
+                  <div className="row-actions" style={{ justifyContent: "space-between" }}>
+                    <strong>{row.territoryName}</strong>
+                    <span className="muted">{pct}%</span>
+                  </div>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: `${pct}%` }} /></div>
                 </div>
-                <div className="bar-track"><div className="bar-fill" style={{ width: `${pct}%` }} /></div>
-              </div>
-            );
-          })}
-        </Card>
-
-        <Card>
-          <SectionTitle title="NBA Compliance Breakdown" />
-          <div className="pn-donut-wrap">
-            <div className="pn-donut" style={donutStyle} />
-            <div className="pn-legend">
-              <div><span className="dot accepted" /> Accepted {analytics.compliance.doneRate.toFixed(0)}%</div>
-              <div><span className="dot modified" /> Modified 15%</div>
-              <div><span className="dot skipped" /> Skipped {Math.max(0, 100 - analytics.compliance.doneRate - 20).toFixed(0)}%</div>
-              <div><span className="dot rescheduled" /> Rescheduled 5%</div>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Card>
-        <SectionTitle title="Weekly Visit Trends" subtitle="Visit distribution across the current month." />
-        <div className="pn-kpi-grid sales-insight-grid">
-          <div className="pn-kpi sales-insight">
-            <span>Total Visits</span>
-            <strong>{totalVisitsMtd}</strong>
-            <em>selected period</em>
-          </div>
-          <div className="pn-kpi sales-insight">
-            <span>Avg Weekly Visits</span>
-            <strong>{weeklyVisitInsights.averageWeeklyVisits.toFixed(1)}</strong>
-            <em>across 4 weeks</em>
-          </div>
-          <div className="pn-kpi sales-insight">
-            <span>Best Week</span>
-            <strong>{weeklyVisitInsights.bestWeek?.label ?? "N/A"}</strong>
-            <em>{weeklyVisitInsights.bestWeek?.visits ?? 0} visits</em>
-          </div>
-          <div className="pn-kpi sales-insight">
-            <span>Latest Momentum</span>
-            <strong>{formatPercent(weeklyVisitInsights.momentum)}</strong>
-            <em>{weeklyVisitInsights.latest?.label ?? "N/A"} vs prior week</em>
-          </div>
-        </div>
-        <div className="pn-weekly-bars">
-          {weeklyVisitInsights.series.map((week) => (
-            <div key={week.label} className="pn-week-col">
-              <div className="pn-week-bar" style={{ height: `${Math.max(20, week.visits)}px` }} />
-              <strong>{week.visits}</strong>
-              <span>{week.label}</span>
-              <small>{week.share.toFixed(0)}%</small>
-            </div>
-          ))}
-        </div>
-        <div className="pn-driver-list sales-insight-list">
-          {weeklyVisitInsights.series.map((week) => (
-            <div key={week.label} className="pn-driver-row">
-              <strong>{week.label}</strong>
-              <span>{week.visits} visits contributed {week.share.toFixed(0)}% of monthly activity</span>
-              <Pill>{week.visits >= weeklyVisitInsights.averageWeeklyVisits ? "Above avg" : "Below avg"}</Pill>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Card>
-        <SectionTitle title="Pharmacy Sales Trends" subtitle="Manager view of pharmacy order volume by product and time." />
-        <div className="pn-kpi-grid sales-insight-grid">
-          <div className="pn-kpi sales-insight">
-            <span>Total Sales Value</span>
-            <strong>{salesTrendInsights.totalAmount.toFixed(2)}</strong>
-            <em>{salesTrendInsights.totalOrders} orders</em>
-          </div>
-          <div className="pn-kpi sales-insight">
-            <span>Total Units</span>
-            <strong>{salesTrendInsights.totalQuantity}</strong>
-            <em>{salesTrendInsights.averageUnitsPerOrder.toFixed(1)} units/order</em>
-          </div>
-          <div className="pn-kpi sales-insight">
-            <span>Avg Order Value</span>
-            <strong>{salesTrendInsights.averageOrderValue.toFixed(2)}</strong>
-            <em>{salesTrendInsights.activeDays} active days</em>
-          </div>
-          <div className="pn-kpi sales-insight">
-            <span>Latest Day Momentum</span>
-            <strong>{formatPercent(salesTrendInsights.amountMomentum)}</strong>
-            <em>{salesTrendInsights.latestPoint?.bucket ?? "no recent sales"}</em>
-          </div>
-        </div>
-
-        <div className="pn-driver-list sales-insight-list">
-          <div className="pn-driver-row">
-            <strong>Peak value day</strong>
-            <span>
-              {salesTrendInsights.peakAmountPoint
-                ? `${salesTrendInsights.peakAmountPoint.bucket} generated ${salesTrendInsights.peakAmountPoint.totalAmount.toFixed(2)}`
-                : "No sales value recorded"}
-            </span>
-            <Pill>{salesTrendInsights.peakAmountPoint ? `${salesTrendInsights.peakAmountPoint.orderCount} orders` : "N/A"}</Pill>
-          </div>
-          <div className="pn-driver-row">
-            <strong>Peak unit movement</strong>
-            <span>
-              {salesTrendInsights.peakQuantityPoint
-                ? `${salesTrendInsights.peakQuantityPoint.bucket} moved ${salesTrendInsights.peakQuantityPoint.totalQuantity} units`
-                : "No units recorded"}
-            </span>
-            <Pill>{salesTrendInsights.peakQuantityPoint ? salesTrendInsights.peakQuantityPoint.totalAmount.toFixed(2) : "N/A"}</Pill>
-          </div>
-          <div className="pn-driver-row">
-            <strong>Daily run rate</strong>
-            <span>Average pharmacy sales value per active day</span>
-            <Pill>{salesTrendInsights.averageDailyAmount.toFixed(2)}</Pill>
-          </div>
-          <div className="pn-driver-row">
-            <strong>Latest day movement</strong>
-            <span>
-              Value {formatPercent(salesTrendInsights.amountMomentum)}, units {formatPercent(salesTrendInsights.quantityMomentum)}, orders {formatPercent(salesTrendInsights.orderMomentum)} versus previous sales day
-            </span>
-            <Pill>{salesTrendInsights.latestPoint ? `${salesTrendInsights.latestPoint.totalQuantity} units` : "N/A"}</Pill>
-          </div>
-        </div>
-
-        <div className="table-list">
-          {salesTrend.series.map((point) => (
-            <div key={point.bucket} className="table-row">
-              <div>
-                <strong>{point.bucket}</strong>
-                <p className="muted">{point.orderCount} orders</p>
-              </div>
-              <div className="chips">
-                <Pill>{point.totalQuantity} units</Pill>
-                <Pill>{point.totalAmount.toFixed(2)}</Pill>
+              );
+            })}
+          </Card>
+          <Card>
+            <SectionTitle title="NBA Compliance Breakdown" />
+            <div className="pn-donut-wrap">
+              <div className="pn-donut" style={donutStyle} />
+              <div className="pn-legend">
+                <div><span className="dot accepted" /> Accepted {analytics.compliance.doneRate.toFixed(0)}%</div>
+                <div><span className="dot modified" /> Modified 15%</div>
+                <div><span className="dot skipped" /> Skipped {Math.max(0, 100 - analytics.compliance.doneRate - 20).toFixed(0)}%</div>
+                <div><span className="dot rescheduled" /> Rescheduled 5%</div>
               </div>
             </div>
-          ))}
-          {salesTrend.series.length === 0 && <p className="muted">No pharmacy sales records for the selected filters.</p>}
+          </Card>
         </div>
-      </Card>
+      )}
 
-      <Card>
-        <SectionTitle title="Assign Pharmacies from OpenStreetMap" subtitle="Search real pharmacies via OpenStreetMap (free, no API key required) and assign them to territories." />
-        <div className="inline-form">
-          <Field label="Search OpenStreetMap">
-            <input value={pharmacySearch} onChange={(event) => setPharmacySearch(event.target.value)} placeholder="Pharmacy name, town, or hospital area" />
-          </Field>
-          <Field label="Territory">
-            <select value={selectedPharmacyTerritoryId} onChange={(event) => setSelectedPharmacyTerritoryId(event.target.value)}>
-              <option value="">Select territory</option>
-              {territories.map((territory) => (
-                <option key={territory.id} value={territory.id}>{territory.name}</option>
+      {activeTab === "sales" && (
+        <>
+          <Card>
+            <SectionTitle title="Weekly Visit Trends" subtitle="Visit distribution across the current month." />
+            <div className="pn-kpi-grid sales-insight-grid">
+              <div className="pn-kpi sales-insight"><span>Total Visits</span><strong>{totalVisitsMtd}</strong><em>selected period</em></div>
+              <div className="pn-kpi sales-insight"><span>Avg Weekly Visits</span><strong>{weeklyVisitInsights.averageWeeklyVisits.toFixed(1)}</strong><em>across 4 weeks</em></div>
+              <div className="pn-kpi sales-insight"><span>Best Week</span><strong>{weeklyVisitInsights.bestWeek?.label ?? "N/A"}</strong><em>{weeklyVisitInsights.bestWeek?.visits ?? 0} visits</em></div>
+              <div className="pn-kpi sales-insight"><span>Latest Momentum</span><strong>{formatPercent(weeklyVisitInsights.momentum)}</strong><em>{weeklyVisitInsights.latest?.label ?? "N/A"} vs prior week</em></div>
+            </div>
+            <div className="pn-weekly-bars">
+              {weeklyVisitInsights.series.map((week) => (
+                <div key={week.label} className="pn-week-col">
+                  <div className="pn-week-bar" style={{ height: `${Math.max(20, week.visits)}px` }} />
+                  <strong>{week.visits}</strong>
+                  <span>{week.label}</span>
+                  <small>{week.share.toFixed(0)}%</small>
+                </div>
               ))}
-            </select>
-          </Field>
-          <Button className="ghost" onClick={() => void searchGooglePlaces()}>Search</Button>
-          <Button onClick={() => void importSelectedPharmacy()}>Assign Pharmacy</Button>
-        </div>
-        <div className="table-list">
-          {googlePharmacyResults.map((place) => (
-            <label key={place.placeId} className="table-row" style={{ cursor: "pointer" }}>
-              <div>
-                <strong>{place.name}</strong>
-                <p className="muted">{place.address || "OpenStreetMap result"}</p>
+            </div>
+            <div className="pn-driver-list sales-insight-list">
+              {weeklyVisitInsights.series.map((week) => (
+                <div key={week.label} className="pn-driver-row">
+                  <strong>{week.label}</strong>
+                  <span>{week.visits} visits contributed {week.share.toFixed(0)}% of monthly activity</span>
+                  <Pill>{week.visits >= weeklyVisitInsights.averageWeeklyVisits ? "Above avg" : "Below avg"}</Pill>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
+            <SectionTitle title="Pharmacy Sales Trends" subtitle="Manager view of pharmacy order volume by product and time." />
+            <div className="pn-kpi-grid sales-insight-grid">
+              <div className="pn-kpi sales-insight"><span>Total Sales Value</span><strong>{salesTrendInsights.totalAmount.toFixed(2)}</strong><em>{salesTrendInsights.totalOrders} orders</em></div>
+              <div className="pn-kpi sales-insight"><span>Total Units</span><strong>{salesTrendInsights.totalQuantity}</strong><em>{salesTrendInsights.averageUnitsPerOrder.toFixed(1)} units/order</em></div>
+              <div className="pn-kpi sales-insight"><span>Avg Order Value</span><strong>{salesTrendInsights.averageOrderValue.toFixed(2)}</strong><em>{salesTrendInsights.activeDays} active days</em></div>
+              <div className="pn-kpi sales-insight"><span>Latest Day Momentum</span><strong>{formatPercent(salesTrendInsights.amountMomentum)}</strong><em>{salesTrendInsights.latestPoint?.bucket ?? "no recent sales"}</em></div>
+            </div>
+            <div className="pn-driver-list sales-insight-list">
+              <div className="pn-driver-row">
+                <strong>Peak value day</strong>
+                <span>{salesTrendInsights.peakAmountPoint ? `${salesTrendInsights.peakAmountPoint.bucket} generated ${salesTrendInsights.peakAmountPoint.totalAmount.toFixed(2)}` : "No sales value recorded"}</span>
+                <Pill>{salesTrendInsights.peakAmountPoint ? `${salesTrendInsights.peakAmountPoint.orderCount} orders` : "N/A"}</Pill>
               </div>
-              <div className="chips">
-                <input
-                  type="radio"
-                  name="selectedGooglePharmacy"
-                  checked={selectedGooglePlaceId === place.placeId}
-                  onChange={() => setSelectedGooglePlaceId(place.placeId)}
-                />
+              <div className="pn-driver-row">
+                <strong>Peak unit movement</strong>
+                <span>{salesTrendInsights.peakQuantityPoint ? `${salesTrendInsights.peakQuantityPoint.bucket} moved ${salesTrendInsights.peakQuantityPoint.totalQuantity} units` : "No units recorded"}</span>
+                <Pill>{salesTrendInsights.peakQuantityPoint ? salesTrendInsights.peakQuantityPoint.totalAmount.toFixed(2) : "N/A"}</Pill>
               </div>
-            </label>
-          ))}
-          {googlePharmacyResults.length === 0 && <p className="muted">Search OpenStreetMap to find pharmacies to assign.</p>}
-        </div>
-        <p className="muted">{pharmacySearchStatus}</p>
-        <div className="table-list">
-          {assignedPharmacies.map((pharmacy) => (
-            <div key={pharmacy.id} className="table-row">
-              <div>
-                <strong>{pharmacy.name}</strong>
-                <p className="muted">{pharmacy.address || pharmacy.notes || "Assigned pharmacy"}</p>
+              <div className="pn-driver-row">
+                <strong>Daily run rate</strong>
+                <span>Average pharmacy sales value per active day</span>
+                <Pill>{salesTrendInsights.averageDailyAmount.toFixed(2)}</Pill>
               </div>
-              <div className="chips">
-                <Pill>{pharmacy.code}</Pill>
-                {pharmacy.googlePlaceId && <Pill>Google Maps</Pill>}
+              <div className="pn-driver-row">
+                <strong>Latest day movement</strong>
+                <span>Value {formatPercent(salesTrendInsights.amountMomentum)}, units {formatPercent(salesTrendInsights.quantityMomentum)}, orders {formatPercent(salesTrendInsights.orderMomentum)} versus previous sales day</span>
+                <Pill>{salesTrendInsights.latestPoint ? `${salesTrendInsights.latestPoint.totalQuantity} units` : "N/A"}</Pill>
               </div>
             </div>
-          ))}
-          {assignedPharmacies.length === 0 && <p className="muted">No pharmacies assigned for the selected territory.</p>}
-        </div>
-      </Card>
-
-      <Card>
-        <SectionTitle title="Target vs Actual by Sales Rep" subtitle="Execution gap by product and rep for the current target week." />
-        <div className="table-list">
-          {analytics.salesTargetProgress.map((row) => (
-            <div key={`${row.salesRepUserId}-${row.productId}-${row.territoryId ?? "all"}`} className="table-row">
-              <div>
-                <strong>{row.salesRepName}</strong>
-                <p className="muted">{row.productName}{row.territoryName ? ` | ${row.territoryName}` : ""}</p>
-              </div>
-              <div className="chips">
-                <Pill>{row.actualQuantity}/{row.targetQuantity} units</Pill>
-                <Pill>{row.quantityAchievementRate.toFixed(0)}%</Pill>
-                <Pill>{row.actualAmount.toFixed(2)}/{row.targetAmount.toFixed(2)}</Pill>
-              </div>
+            <div className="table-list">
+              {salesTrend.series.map((point) => (
+                <div key={point.bucket} className="table-row">
+                  <div>
+                    <strong>{point.bucket}</strong>
+                    <p className="muted">{point.orderCount} orders</p>
+                  </div>
+                  <div className="chips">
+                    <Pill>{point.totalQuantity} units</Pill>
+                    <Pill>{point.totalAmount.toFixed(2)}</Pill>
+                  </div>
+                </div>
+              ))}
+              {salesTrend.series.length === 0 && <p className="muted">No pharmacy sales records for the selected filters.</p>}
             </div>
-          ))}
-          {analytics.salesTargetProgress.length === 0 && <p className="muted">No sales target progress available.</p>}
-        </div>
-      </Card>
+          </Card>
+        </>
+      )}
 
-      <Card>
-        <SectionTitle title="Missed High-Priority Doctors" />
-        <div className="table-list">
-          {analytics.missedHighPriority.map((item) => (
-            <div key={item.doctorId} className="table-row">
-              <div>
-                <strong>{item.doctorName}</strong>
-                <p className="muted">{item.territoryName || "N/A"}</p>
-              </div>
-              <div className="chips">
-                <Pill>Priority {item.priorityScore}</Pill>
-                <Pill>{item.lastVisitTime ? `${Math.max(0, Math.round((Date.now() - new Date(item.lastVisitTime).getTime()) / 86400000))} days since last visit` : "Never visited"}</Pill>
-              </div>
-            </div>
-          ))}
-          {analytics.missedHighPriority.length === 0 && <p className="muted">No missed high-priority doctors.</p>}
-        </div>
-      </Card>
-
-      <div className="pn-manager-grid">
+      {activeTab === "pharmacy" && (
         <Card>
-          <SectionTitle title="Coaching Summary" subtitle="Day-plan usage, work-window adherence, and overdue reschedules." />
-          <div className="manager-coaching-list">
-            <div className="manager-coaching-row">
-              <strong>Configured day plans</strong>
-              <span>{analytics.coachingSummary.configuredScheduleCount} of {analytics.coachingSummary.totalMrCount} MRs</span>
-              <Pill>{analytics.coachingSummary.scheduleCoverageRate.toFixed(0)}%</Pill>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+            <SectionTitle
+              title={pharmacyInputMode === "search" ? "Assign Pharmacies from OpenStreetMap" : "Add Pharmacy Manually"}
+              subtitle={pharmacyInputMode === "search"
+                ? "Search OSM for pharmacies already mapped in your region."
+                : "Enter pharmacy details directly — useful when OSM data is sparse."}
+            />
+            <div className="pn-tab-bar" style={{ padding: 4, borderRadius: 10 }}>
+              <button
+                type="button"
+                className={`pn-tab-btn${pharmacyInputMode === "search" ? " active" : ""}`}
+                style={{ padding: "6px 14px", fontSize: 13 }}
+                onClick={() => setPharmacyInputMode("search")}
+              >
+                OSM Search
+              </button>
+              <button
+                type="button"
+                className={`pn-tab-btn${pharmacyInputMode === "manual" ? " active" : ""}`}
+                style={{ padding: "6px 14px", fontSize: 13 }}
+                onClick={() => setPharmacyInputMode("manual")}
+              >
+                Manual Entry
+              </button>
             </div>
-            <div className="manager-coaching-row">
-              <strong>Visits inside work windows</strong>
-              <span>Share of visits logged within MR workday minus break windows</span>
-              <Pill>{analytics.coachingSummary.workdayVisitRate.toFixed(0)}%</Pill>
-            </div>
-            <div className="manager-coaching-row">
-              <strong>Average day-plan adherence</strong>
-              <span>Average visit volume against each MR's planned daily capacity</span>
-              <Pill>{analytics.coachingSummary.planAdherenceRate.toFixed(0)}%</Pill>
-            </div>
-            <div className="manager-coaching-row">
-              <strong>Overdue reschedules</strong>
-              <span>Recommendations that were rescheduled but are now past due</span>
-              <Pill>{analytics.coachingSummary.overdueReschedules}</Pill>
-            </div>
-            <div className="manager-coaching-row">
-              <strong>At-risk MRs</strong>
-              <span>Missing plans, low work-window adherence, or overdue follow-up load</span>
-              <Pill>{analytics.coachingSummary.atRiskMrCount}</Pill>
+          </div>
+
+          {pharmacyInputMode === "search" && (
+            <>
+              <div className="inline-form">
+                <Field label="Search OpenStreetMap">
+                  <input value={pharmacySearch} onChange={(event) => setPharmacySearch(event.target.value)} placeholder="Pharmacy name, town, or hospital area" />
+                </Field>
+                <Field label="Territory">
+                  <select value={selectedPharmacyTerritoryId} onChange={(event) => setSelectedPharmacyTerritoryId(event.target.value)}>
+                    <option value="">Select territory</option>
+                    {territories.map((territory) => (
+                      <option key={territory.id} value={territory.id}>{territory.name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Button className="ghost" onClick={() => void searchGooglePlaces()}>Search</Button>
+                <Button onClick={() => void importSelectedPharmacy()}>Assign Pharmacy</Button>
+              </div>
+              <div className="table-list">
+                {googlePharmacyResults.map((place) => (
+                  <label key={place.placeId} className="table-row" style={{ cursor: "pointer" }}>
+                    <div>
+                      <strong>{place.name}</strong>
+                      <p className="muted">{place.address || "OpenStreetMap result"}</p>
+                    </div>
+                    <div className="chips">
+                      <input
+                        type="radio"
+                        name="selectedGooglePharmacy"
+                        checked={selectedGooglePlaceId === place.placeId}
+                        onChange={() => setSelectedGooglePlaceId(place.placeId)}
+                      />
+                    </div>
+                  </label>
+                ))}
+                {googlePharmacyResults.length === 0 && (
+                  <p className="muted">
+                    {pharmacySearchStatus
+                      ? pharmacySearchStatus
+                      : "Search OpenStreetMap to find pharmacies to assign. If no results appear, use Manual Entry instead."}
+                  </p>
+                )}
+              </div>
+              {googlePharmacyResults.length > 0 && <p className="muted">{pharmacySearchStatus}</p>}
+            </>
+          )}
+
+          {pharmacyInputMode === "manual" && (
+            <>
+              <div className="inline-form">
+                <Field label="Pharmacy Name *">
+                  <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="e.g. Samadhi Pharmacy" />
+                </Field>
+                <Field label="Address">
+                  <input value={manualAddress} onChange={(e) => setManualAddress(e.target.value)} placeholder="Street, city or area" />
+                </Field>
+                <Button className="ghost" onClick={() => void geocodeManualAddress()}>Find Coordinates</Button>
+              </div>
+              <div className="inline-form">
+                <Field label="Latitude">
+                  <input type="number" step="any" value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="e.g. 6.9271" />
+                </Field>
+                <Field label="Longitude">
+                  <input type="number" step="any" value={manualLng} onChange={(e) => setManualLng(e.target.value)} placeholder="e.g. 79.8612" />
+                </Field>
+                <Field label="Territory *">
+                  <select value={selectedPharmacyTerritoryId} onChange={(event) => setSelectedPharmacyTerritoryId(event.target.value)}>
+                    <option value="">Select territory</option>
+                    {territories.map((territory) => (
+                      <option key={territory.id} value={territory.id}>{territory.name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Button onClick={() => void saveManualPharmacy()}>Save Pharmacy</Button>
+              </div>
+              {manualStatus && <p className="muted">{manualStatus}</p>}
+            </>
+          )}
+
+          <div style={{ marginTop: 16 }}>
+            <p className="muted" style={{ marginBottom: 6, fontWeight: 600 }}>Assigned pharmacies</p>
+            <div className="table-list">
+              {assignedPharmacies.map((pharmacy) => (
+                <div key={pharmacy.id} className="table-row">
+                  <div>
+                    <strong>{pharmacy.name}</strong>
+                    <p className="muted">{pharmacy.address || pharmacy.notes || "Assigned pharmacy"}</p>
+                  </div>
+                  <div className="chips">
+                    <Pill>{pharmacy.code}</Pill>
+                    {pharmacy.googlePlaceId?.startsWith("manual:") ? <Pill>Manual</Pill> : pharmacy.googlePlaceId ? <Pill>OSM</Pill> : null}
+                  </div>
+                </div>
+              ))}
+              {assignedPharmacies.length === 0 && <p className="muted">No pharmacies assigned for the selected territory.</p>}
             </div>
           </div>
         </Card>
+      )}
 
-        <Card>
-          <SectionTitle title="MR Coaching Queue" subtitle="Practical coaching focus for the next conversation." />
-          <div className="table-list">
-            {analytics.coachingByMr.map((row) => (
-              <div key={row.mrId} className="table-row">
-                <div>
-                  <strong>{row.mrName}</strong>
-                  <p className="muted">{row.coachingFocus}</p>
+      {activeTab === "targets" && (
+        <>
+          <Card>
+            <SectionTitle title="Target vs Actual by Sales Rep" subtitle="Execution gap by product and rep for the current target week." />
+            <div className="table-list">
+              {analytics.salesTargetProgress.map((row) => (
+                <div key={`${row.salesRepUserId}-${row.productId}-${row.territoryId ?? "all"}`} className="table-row">
+                  <div>
+                    <strong>{row.salesRepName}</strong>
+                    <p className="muted">{row.productName}{row.territoryName ? ` | ${row.territoryName}` : ""}</p>
+                  </div>
+                  <div className="chips">
+                    <Pill>{row.actualQuantity}/{row.targetQuantity} units</Pill>
+                    <Pill>{row.quantityAchievementRate.toFixed(0)}%</Pill>
+                    <Pill>{row.actualAmount.toFixed(2)}/{row.targetAmount.toFixed(2)}</Pill>
+                  </div>
                 </div>
-                <div className="chips">
-                  <Pill>{row.scheduleConfigured ? "Plan set" : "No plan"}</Pill>
-                  <Pill>{row.workdayVisitRate.toFixed(0)}% in work window</Pill>
-                  <Pill>{row.avgVisitsPerActiveDay.toFixed(1)}/{row.maxVisitsPerDay || 0} visits/day</Pill>
-                  <Pill>{row.overdueReschedules} overdue</Pill>
+              ))}
+              {analytics.salesTargetProgress.length === 0 && <p className="muted">No sales target progress available.</p>}
+            </div>
+          </Card>
+
+          <Card>
+            <SectionTitle
+              title="Assigned Brands"
+              subtitle={targetSalesRepId
+                ? `Active brand assignments for ${salesReps.find((r) => r.id === targetSalesRepId)?.fullName ?? "selected rep"}.`
+                : "Select a Sales Rep above to view their brand assignments."}
+            />
+            {srProducts.length > 0 ? (
+              <div className="table-list">
+                {srProducts.map((p) => (
+                  <div key={p.productId} className="table-row">
+                    <div>
+                      <strong>{p.brandName || p.productName}</strong>
+                      <p className="muted">{p.productName}{p.productCode ? ` · ${p.productCode}` : ""}{p.manufacturerType ? ` · ${p.manufacturerType}` : ""}</p>
+                    </div>
+                    <div className="chips">
+                      <Pill>{p.active ? "Active" : "Inactive"}</Pill>
+                      <Pill>from {p.startsOn}</Pill>
+                      {p.endsOn && <Pill>until {p.endsOn}</Pill>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">
+                {targetSalesRepId ? "No brands assigned to this rep." : "Select a Sales Rep to view assigned brands."}
+              </p>
+            )}
+          </Card>
+        </>
+      )}
+
+      {activeTab === "coaching" && (
+        <>
+          <Card>
+            <SectionTitle
+              title="Visit Logs"
+              subtitle={mrId
+                ? `Recent doctor visits by ${mrs.find((m) => m.id === mrId)?.fullName ?? "selected MR"}.`
+                : "Select an MR in the filter above to view their visit history."}
+            />
+            {mrVisitsLoading && <p className="muted">Loading visits…</p>}
+            {!mrVisitsLoading && mrVisits.length > 0 && (
+              <div className="table-list">
+                {mrVisits.map((v) => (
+                  <div key={v.id} className="table-row">
+                    <div>
+                      <strong>{v.doctorName ?? "Doctor"}</strong>
+                      <p className="muted">
+                        {new Date(v.visitTime).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                        {v.notes ? ` · ${v.notes.slice(0, 60)}${v.notes.length > 60 ? "…" : ""}` : ""}
+                      </p>
+                    </div>
+                    <div className="chips">
+                      <Pill>{v.outcome}</Pill>
+                      {v.followUpRequired && <Pill>Follow-up</Pill>}
+                      {v.gpsCaptured && <Pill>GPS</Pill>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!mrVisitsLoading && mrVisits.length === 0 && (
+              <p className="muted">{mrId ? "No visits recorded for this MR." : "Select an MR to view visit logs."}</p>
+            )}
+          </Card>
+
+          <Card>
+            <SectionTitle title="Missed High-Priority Doctors" />
+            <div className="table-list">
+              {analytics.missedHighPriority.map((item) => (
+                <div key={item.doctorId} className="table-row">
+                  <div>
+                    <strong>{item.doctorName}</strong>
+                    <p className="muted">{item.territoryName || "N/A"}</p>
+                  </div>
+                  <div className="chips">
+                    <Pill>Priority {item.priorityScore}</Pill>
+                    <Pill>{item.lastVisitTime ? `${Math.max(0, Math.round((Date.now() - new Date(item.lastVisitTime).getTime()) / 86400000))} days since last visit` : "Never visited"}</Pill>
+                  </div>
+                </div>
+              ))}
+              {analytics.missedHighPriority.length === 0 && <p className="muted">No missed high-priority doctors.</p>}
+            </div>
+          </Card>
+          <div className="pn-manager-grid">
+            <Card>
+              <SectionTitle title="Coaching Summary" subtitle="Day-plan usage, work-window adherence, and overdue reschedules." />
+              <div className="manager-coaching-list">
+                <div className="manager-coaching-row">
+                  <strong>Configured day plans</strong>
+                  <span>{analytics.coachingSummary.configuredScheduleCount} of {analytics.coachingSummary.totalMrCount} MRs</span>
+                  <Pill>{analytics.coachingSummary.scheduleCoverageRate.toFixed(0)}%</Pill>
+                </div>
+                <div className="manager-coaching-row">
+                  <strong>Visits inside work windows</strong>
+                  <span>Share of visits logged within MR workday minus break windows</span>
+                  <Pill>{analytics.coachingSummary.workdayVisitRate.toFixed(0)}%</Pill>
+                </div>
+                <div className="manager-coaching-row">
+                  <strong>Average day-plan adherence</strong>
+                  <span>Average visit volume against each MR's planned daily capacity</span>
+                  <Pill>{analytics.coachingSummary.planAdherenceRate.toFixed(0)}%</Pill>
+                </div>
+                <div className="manager-coaching-row">
+                  <strong>Overdue reschedules</strong>
+                  <span>Recommendations that were rescheduled but are now past due</span>
+                  <Pill>{analytics.coachingSummary.overdueReschedules}</Pill>
+                </div>
+                <div className="manager-coaching-row">
+                  <strong>At-risk MRs</strong>
+                  <span>Missing plans, low work-window adherence, or overdue follow-up load</span>
+                  <Pill>{analytics.coachingSummary.atRiskMrCount}</Pill>
                 </div>
               </div>
-            ))}
-            {analytics.coachingByMr.length === 0 && <p className="muted">No coaching rows available for the selected filters.</p>}
+            </Card>
+            <Card>
+              <SectionTitle title="MR Coaching Queue" subtitle="Practical coaching focus for the next conversation." />
+              <div className="table-list">
+                {analytics.coachingByMr.map((row) => (
+                  <div key={row.mrId} className="table-row">
+                    <div>
+                      <strong>{row.mrName}</strong>
+                      <p className="muted">{row.coachingFocus}</p>
+                    </div>
+                    <div className="chips">
+                      <Pill>{row.scheduleConfigured ? "Plan set" : "No plan"}</Pill>
+                      <Pill>{row.workdayVisitRate.toFixed(0)}% in work window</Pill>
+                      <Pill>{row.avgVisitsPerActiveDay.toFixed(1)}/{row.maxVisitsPerDay || 0} visits/day</Pill>
+                      <Pill>{row.overdueReschedules} overdue</Pill>
+                    </div>
+                  </div>
+                ))}
+                {analytics.coachingByMr.length === 0 && <p className="muted">No coaching rows available for the selected filters.</p>}
+              </div>
+            </Card>
           </div>
-        </Card>
-      </div>
+        </>
+      )}
+
+      {status && <p className="muted" style={{ padding: "0 4px" }}>{status}</p>}
     </div>
   );
 }

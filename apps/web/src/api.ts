@@ -449,6 +449,7 @@ export type EvaluationSummary = {
 export type Visit = {
   id: string;
   doctorId: string;
+  doctorName?: string | null;
   userId: string;
   visitTime: string;
   outcome: string;
@@ -1033,6 +1034,14 @@ export async function fetchMyVisits(token: string, page = 0, size = 20) {
     headers: { Authorization: `Bearer ${token}` },
   });
   ensureAuthorizedResponse(res, "Failed to load visits");
+  return (await res.json()) as PageResponse<Visit>;
+}
+
+export async function fetchUserVisits(token: string, userId: string, page = 0, size = 20) {
+  const res = await fetch(`${apiBase}/users/${userId}/visits?page=${page}&size=${size}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load user visits");
   return (await res.json()) as PageResponse<Visit>;
 }
 

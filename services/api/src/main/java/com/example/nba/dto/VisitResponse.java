@@ -6,6 +6,7 @@ import java.util.UUID;
 public record VisitResponse(
     UUID id,
     UUID doctorId,
+    String doctorName,
     UUID userId,
     OffsetDateTime visitTime,
     String outcome,
