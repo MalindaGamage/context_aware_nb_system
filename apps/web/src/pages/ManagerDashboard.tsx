@@ -23,7 +23,7 @@ import {
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { greetingLine, territoryZoneLabel } from "../lib/greeting";
-import { loadGoogleMaps } from "../lib/googleMaps";
+import { searchNominatimPharmacies } from "../lib/nominatim";
 import { Button, Card, Field, Pill, SectionTitle } from "../ui/components";
 
 const defaultAnalytics: ManagerAnalyticsResponse = {
@@ -187,88 +187,55 @@ export default function ManagerDashboard() {
 
   const searchGooglePlaces = async () => {
     if (!pharmacySearch.trim()) {
-      setPharmacySearchStatus("Enter a pharmacy name or area to search Google Maps");
+      setPharmacySearchStatus("Enter a pharmacy name or area to search");
       return;
     }
     try {
-      setPharmacySearchStatus("Searching Google Maps...");
-      const maps = await loadGoogleMaps();
-      const service = new maps.places.PlacesService(document.createElement("div"));
-      const results = await new Promise<GooglePlaceCandidate[]>((resolve, reject) => {
-        service.textSearch(
-          { query: `${pharmacySearch.trim()} pharmacy Sri Lanka` },
-          (places: any[] | null, responseStatus: string) => {
-            if (responseStatus !== maps.places.PlacesServiceStatus.OK || !places) {
-              reject(new Error("No places found"));
-              return;
-            }
-            resolve(
-              places
-                .filter((place) => place.place_id && place.geometry?.location)
-                .slice(0, 8)
-                .map((place) => ({
-                  placeId: place.place_id,
-                  name: place.name ?? "Google Maps pharmacy",
-                  address: place.formatted_address ?? place.vicinity ?? "",
-                  lat: place.geometry.location.lat(),
-                  lon: place.geometry.location.lng(),
-                }))
-            );
-          }
-        );
-      });
-      setGooglePharmacyResults(results);
-      setSelectedGooglePlaceId((current) => current || results[0]?.placeId || "");
-      setPharmacySearchStatus(results.length === 0 ? "No Google Maps pharmacies found" : `${results.length} Google Maps pharmacies found`);
+      setPharmacySearchStatus("Searching OpenStreetMap...");
+      const results = await searchNominatimPharmacies(pharmacySearch.trim());
+      const candidates: GooglePlaceCandidate[] = results.map((item) => ({
+        placeId: item.osmId,
+        name: item.name,
+        address: item.address,
+        lat: item.lat,
+        lon: item.lon,
+      }));
+      setGooglePharmacyResults(candidates);
+      setSelectedGooglePlaceId(candidates[0]?.placeId || "");
+      setPharmacySearchStatus(
+        candidates.length === 0 ? "No pharmacies found on OpenStreetMap" : `${candidates.length} pharmacies found`
+      );
     } catch {
       setGooglePharmacyResults([]);
       setSelectedGooglePlaceId("");
-      setPharmacySearchStatus("Failed to search Google Maps pharmacies");
+      setPharmacySearchStatus("Failed to search OpenStreetMap pharmacies");
     }
   };
 
   const importSelectedPharmacy = async () => {
     if (!token || !selectedGooglePlaceId || !selectedPharmacyTerritoryId) {
-      setPharmacySearchStatus("Select a Google Maps pharmacy and a territory");
+      setPharmacySearchStatus("Select a pharmacy and a territory");
       return;
     }
     const selected = googlePharmacyResults.find((item) => item.placeId === selectedGooglePlaceId);
     if (!selected) {
-      setPharmacySearchStatus("Select a Google Maps pharmacy to assign");
+      setPharmacySearchStatus("Select a pharmacy to assign");
       return;
     }
     try {
-      const maps = await loadGoogleMaps();
-      const service = new maps.places.PlacesService(document.createElement("div"));
-      const details = await new Promise<any>((resolve, reject) => {
-        service.getDetails(
-          {
-            placeId: selected.placeId,
-            fields: ["name", "formatted_address", "formatted_phone_number", "geometry", "place_id"],
-          },
-          (place: any, responseStatus: string) => {
-            if (responseStatus !== maps.places.PlacesServiceStatus.OK || !place?.place_id || !place?.geometry?.location) {
-              reject(new Error("Failed to load place details"));
-              return;
-            }
-            resolve(place);
-          }
-        );
-      });
       const saved = await importGooglePharmacy(token, {
-        googlePlaceId: details.place_id,
-        name: details.name ?? selected.name,
+        googlePlaceId: selected.placeId,
+        name: selected.name,
         territoryId: selectedPharmacyTerritoryId,
-        address: details.formatted_address ?? selected.address,
-        contactNumber: details.formatted_phone_number ?? undefined,
-        lat: details.geometry.location.lat(),
-        lon: details.geometry.location.lng(),
+        address: selected.address,
+        lat: selected.lat,
+        lon: selected.lon,
       });
       setPharmacySearchStatus(`Assigned ${saved.name} to the selected territory`);
       const refreshed = await fetchPharmacies(token, { territoryId: selectedPharmacyTerritoryId, size: 20 });
       setAssignedPharmacies(refreshed.content);
     } catch {
-      setPharmacySearchStatus("Failed to assign pharmacy from Google Maps");
+      setPharmacySearchStatus("Failed to assign pharmacy");
     }
   };
 
@@ -661,9 +628,9 @@ export default function ManagerDashboard() {
       </Card>
 
       <Card>
-        <SectionTitle title="Assign Google Maps Pharmacies" subtitle="Managers search real pharmacies from Google Maps and assign them to territories." />
+        <SectionTitle title="Assign Pharmacies from OpenStreetMap" subtitle="Search real pharmacies via OpenStreetMap (free, no API key required) and assign them to territories." />
         <div className="inline-form">
-          <Field label="Search Google Maps">
+          <Field label="Search OpenStreetMap">
             <input value={pharmacySearch} onChange={(event) => setPharmacySearch(event.target.value)} placeholder="Pharmacy name, town, or hospital area" />
           </Field>
           <Field label="Territory">
@@ -682,7 +649,7 @@ export default function ManagerDashboard() {
             <label key={place.placeId} className="table-row" style={{ cursor: "pointer" }}>
               <div>
                 <strong>{place.name}</strong>
-                <p className="muted">{place.address || "Google Maps result"}</p>
+                <p className="muted">{place.address || "OpenStreetMap result"}</p>
               </div>
               <div className="chips">
                 <input
@@ -694,7 +661,7 @@ export default function ManagerDashboard() {
               </div>
             </label>
           ))}
-          {googlePharmacyResults.length === 0 && <p className="muted">Search Google Maps to find pharmacies to assign.</p>}
+          {googlePharmacyResults.length === 0 && <p className="muted">Search OpenStreetMap to find pharmacies to assign.</p>}
         </div>
         <p className="muted">{pharmacySearchStatus}</p>
         <div className="table-list">

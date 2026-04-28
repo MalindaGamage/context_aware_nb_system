@@ -30,7 +30,11 @@ import {
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { greetingLine, territoryZoneLabel } from "../lib/greeting";
-import { getGoogleMapsApiKey, loadGoogleMaps } from "../lib/googleMaps";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { fetchOsrmRoute, travelModeToOsrmProfile } from "../lib/osrmRouting";
+import { geocodeAddress } from "../lib/nominatim";
+import { searchNearbyPharmacies } from "../lib/overpassPharmacy";
 import {
   cacheNbaSnapshot,
   getCachedNbaSnapshot,
@@ -266,14 +270,11 @@ export default function NbaDashboardPage() {
   const [doctorSearchQuery, setDoctorSearchQuery] = useState("");
   const [now, setNow] = useState(() => new Date());
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
-  const mapsRef = useRef<any>(null);
-  const infoWindowRef = useRef<any>(null);
-  const directionsRendererRef = useRef<any>(null);
-  const trafficLayerRef = useRef<any>(null);
-  const userMarkerRef = useRef<any>(null);
-  const userAccuracyCircleRef = useRef<any>(null);
-  const markerRegistryRef = useRef<Map<string, any>>(new Map());
+  const mapRef = useRef<L.Map | null>(null);
+  const routeLayerRef = useRef<L.Polyline | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+  const userAccuracyCircleRef = useRef<L.Circle | null>(null);
+  const markerRegistryRef = useRef<Map<string, L.Marker>>(new Map());
   const watchIdRef = useRef<number | null>(null);
 
   const greetingName = useMemo(() => {
@@ -601,53 +602,33 @@ export default function NbaDashboardPage() {
   }, [destinations, doctors, recommendations, selectedDestinationId]);
 
   useEffect(() => {
-    if (!mapContainerRef.current) return;
-    if (!getGoogleMapsApiKey()) {
-      setMapError("Add VITE_GOOGLE_MAPS_API_KEY to enable live map, routing, and pharmacy search.");
-      return;
-    }
+    if (!mapContainerRef.current || mapRef.current) return;
 
-    let cancelled = false;
+    const initialCenter = currentPosition ?? destinations[0]?.location ?? DEFAULT_CENTER;
+    const map = L.map(mapContainerRef.current, {
+      center: [initialCenter.lat, initialCenter.lng],
+      zoom: 12,
+      zoomControl: true,
+    });
 
-    void loadGoogleMaps()
-      .then((maps) => {
-        if (cancelled || !mapContainerRef.current) return;
-        mapsRef.current = maps;
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
 
-        if (!mapRef.current) {
-          mapRef.current = new maps.Map(mapContainerRef.current, {
-            center: currentPosition ?? destinations[0]?.location ?? DEFAULT_CENTER,
-            zoom: 12,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: true,
-            clickableIcons: true,
-          });
-          directionsRendererRef.current = new maps.DirectionsRenderer({
-            map: mapRef.current,
-            suppressMarkers: true,
-            polylineOptions: {
-              strokeColor: "#0f8b80",
-              strokeOpacity: 0.95,
-              strokeWeight: 6,
-            },
-          });
-          infoWindowRef.current = new maps.InfoWindow();
-          trafficLayerRef.current = new maps.TrafficLayer();
-        }
-
-        setMapError("");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMapError("Google Maps failed to load. Check the key, billing, and domain restrictions.");
-        }
-      });
+    mapRef.current = map;
+    setMapError("");
 
     return () => {
-      cancelled = true;
+      map.remove();
+      mapRef.current = null;
+      markerRegistryRef.current.forEach((marker) => marker.remove());
+      markerRegistryRef.current.clear();
+      routeLayerRef.current = null;
+      userMarkerRef.current = null;
+      userAccuracyCircleRef.current = null;
     };
-  }, [currentPosition, destinations]);
+  }, []); // initialize once on mount
 
   useEffect(() => {
     if (!locationConsent || !liveTrackingEnabled) {
@@ -711,344 +692,243 @@ export default function NbaDashboardPage() {
   }, [liveTrackingEnabled, locationConsent, storageMode]);
 
   useEffect(() => {
-    const maps = mapsRef.current;
     const map = mapRef.current;
-    if (!maps || !map) return;
+    if (!map) return;
 
     if (!currentPosition) {
-      if (userMarkerRef.current) {
-        userMarkerRef.current.setMap(null);
-        userMarkerRef.current = null;
-      }
-      if (userAccuracyCircleRef.current) {
-        userAccuracyCircleRef.current.setMap(null);
-        userAccuracyCircleRef.current = null;
-      }
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
+      userAccuracyCircleRef.current?.remove();
+      userAccuracyCircleRef.current = null;
       return;
     }
 
-    if (!userMarkerRef.current) {
-      userMarkerRef.current = new maps.Marker({
-        map,
-        title: "Medical Rep live location",
-        icon: {
-          path: maps.SymbolPath.CIRCLE,
-          scale: 9,
-          fillColor: "#2563eb",
-          fillOpacity: 1,
-          strokeColor: "#ffffff",
-          strokeWeight: 3,
-        },
-        zIndex: 10,
-      });
-    }
+    const mrIcon = L.divIcon({
+      html: `<div style="width:18px;height:18px;background:#2563eb;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #2563eb;"></div>`,
+      className: "",
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
 
-    userMarkerRef.current.setPosition(currentPosition);
+    if (!userMarkerRef.current) {
+      userMarkerRef.current = L.marker([currentPosition.lat, currentPosition.lng], {
+        icon: mrIcon,
+        zIndexOffset: 1000,
+        title: "Medical Rep live location",
+      }).addTo(map);
+    } else {
+      userMarkerRef.current.setLatLng([currentPosition.lat, currentPosition.lng]);
+      userMarkerRef.current.setIcon(mrIcon);
+    }
 
     if (!userAccuracyCircleRef.current) {
-      userAccuracyCircleRef.current = new maps.Circle({
-        map,
-        strokeColor: "#2563eb",
-        strokeOpacity: 0.5,
-        strokeWeight: 1,
+      userAccuracyCircleRef.current = L.circle([currentPosition.lat, currentPosition.lng], {
+        radius: locationAccuracy ?? 0,
+        color: "#2563eb",
+        weight: 1,
+        opacity: 0.5,
         fillColor: "#93c5fd",
         fillOpacity: 0.18,
-      });
+      }).addTo(map);
+    } else {
+      userAccuracyCircleRef.current.setLatLng([currentPosition.lat, currentPosition.lng]);
+      userAccuracyCircleRef.current.setRadius(locationAccuracy ?? 0);
     }
-
-    userAccuracyCircleRef.current.setCenter(currentPosition);
-    userAccuracyCircleRef.current.setRadius(locationAccuracy ?? 0);
   }, [currentPosition, locationAccuracy]);
 
-  useEffect(() => {
-    const trafficLayer = trafficLayerRef.current;
-    const map = mapRef.current;
-    if (!trafficLayer || !map) return;
-    trafficLayer.setMap(showTrafficLayer ? map : null);
-  }, [showTrafficLayer]);
+  // Traffic overlay is not available with free OSM tiles (no-op kept for state compat)
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !regionCenter) return;
     if (selectedDestination || currentPosition || searchAnchor) return;
-    map.panTo(regionCenter);
+    map.setView([regionCenter.lat, regionCenter.lng], map.getZoom() ?? 12);
   }, [currentPosition, regionCenter, searchAnchor, selectedDestination]);
 
   useEffect(() => {
-    const maps = mapsRef.current;
     const map = mapRef.current;
-    const infoWindow = infoWindowRef.current;
-    if (!maps || !map || !infoWindow) return;
+    if (!map) return;
 
     const nextIds = new Set(destinations.map((destination) => destination.id));
     markerRegistryRef.current.forEach((marker, id) => {
       if (!nextIds.has(id)) {
-        marker.setMap(null);
+        marker.remove();
         markerRegistryRef.current.delete(id);
       }
     });
 
     destinations.forEach((destination) => {
-      const existingMarker = markerRegistryRef.current.get(destination.id);
-      if (existingMarker) {
-        existingMarker.setPosition(destination.location);
+      const existing = markerRegistryRef.current.get(destination.id);
+      if (existing) {
+        existing.setLatLng([destination.location.lat, destination.location.lng]);
         return;
       }
 
-      const marker = new maps.Marker({
-        map,
-        position: destination.location,
-        title: destination.name,
-        icon:
-          destination.kind === "doctor"
-            ? {
-                path: maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-                scale: 6,
-                fillColor: "#0f8b80",
-                fillOpacity: 1,
-                strokeColor: "#083344",
-                strokeWeight: 1,
-              }
-            : {
-                path: maps.SymbolPath.CIRCLE,
-                scale: 7,
-                fillColor: "#f59e0b",
-                fillOpacity: 1,
-                strokeColor: "#7c2d12",
-                strokeWeight: 2,
-              },
-      });
+      const icon =
+        destination.kind === "doctor"
+          ? L.divIcon({
+              html: `<div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:16px solid #0f8b80;filter:drop-shadow(0 1px 1px #083344);"></div>`,
+              className: "",
+              iconSize: [16, 16],
+              iconAnchor: [8, 16],
+            })
+          : L.divIcon({
+              html: `<div style="width:14px;height:14px;background:#f59e0b;border:2px solid #7c2d12;border-radius:50%;"></div>`,
+              className: "",
+              iconSize: [14, 14],
+              iconAnchor: [7, 7],
+            });
 
-      marker.addListener("click", () => {
-        setSelectedDestinationId(destination.id);
-        infoWindow.setContent(
-          `<div style="min-width:220px"><strong>${destination.name}</strong><div>${destination.address}</div><div style="margin-top:6px">${destination.kind === "doctor" ? "Assigned doctor" : "Nearby pharmacy"}</div></div>`
-        );
-        infoWindow.open({ anchor: marker, map });
-      });
+      const marker = L.marker([destination.location.lat, destination.location.lng], {
+        icon,
+        title: destination.name,
+      })
+        .addTo(map)
+        .bindPopup(
+          `<div style="min-width:200px"><strong>${destination.name}</strong>` +
+            `<div style="margin-top:4px;font-size:0.85em">${destination.address}</div>` +
+            `<div style="margin-top:4px;color:#6b7280">${destination.kind === "doctor" ? "Assigned doctor" : "Nearby pharmacy"}</div></div>`
+        )
+        .on("click", () => {
+          setSelectedDestinationId(destination.id);
+        });
 
       markerRegistryRef.current.set(destination.id, marker);
     });
   }, [destinations]);
 
   useEffect(() => {
-    const maps = mapsRef.current;
-    const map = mapRef.current;
-    if (!maps || !map) return;
-
     const origin = searchAnchor ?? currentPosition ?? destinations[0]?.location;
     if (!origin) return;
     const radiusMeters = Math.max(1000, Math.min(50000, Number(pharmacyRadiusKm || "10") * 1000));
 
-    const service = new maps.places.PlacesService(map);
-    service.nearbySearch(
-      {
-        location: origin,
-        radius: radiusMeters,
-        type: "pharmacy",
-      },
-      (results: any[], status: string) => {
-        if (status !== maps.places.PlacesServiceStatus.OK || !Array.isArray(results)) {
-          setPharmacies([]);
-          return;
-        }
-
-        const next = results.slice(0, 10).flatMap((place) => {
-          const lat = place.geometry?.location?.lat?.();
-          const lng = place.geometry?.location?.lng?.();
-          if (typeof lat !== "number" || typeof lng !== "number") {
-            return [];
-          }
-
-          return [
-            {
-              id: `pharmacy:${place.place_id}`,
-              kind: "pharmacy" as const,
-              name: place.name || "Pharmacy",
-              address: place.vicinity || place.formatted_address || "Google Maps pharmacy listing",
-              location: { lat, lng },
-              distanceKm: currentPosition ? haversineKm(currentPosition, { lat, lng }) : null,
-              placeId: place.place_id,
-            },
-          ];
-        });
-
-        setPharmacies(next);
-      }
-    );
+    void searchNearbyPharmacies(origin, radiusMeters).then((results) => {
+      const next = results.map((pharmacy) => ({
+        id: pharmacy.id,
+        kind: "pharmacy" as const,
+        name: pharmacy.name,
+        address: pharmacy.address,
+        location: { lat: pharmacy.lat, lng: pharmacy.lng },
+        distanceKm: currentPosition ? haversineKm(currentPosition, { lat: pharmacy.lat, lng: pharmacy.lng }) : null,
+        placeId: pharmacy.id,
+      }));
+      setPharmacies(next);
+    });
   }, [currentPosition, destinations, pharmacyRadiusKm, searchAnchor]);
 
   useEffect(() => {
-    const maps = mapsRef.current;
     const map = mapRef.current;
-    const renderer = directionsRendererRef.current;
-    if (!maps || !map || !renderer) return;
+    if (!map) return;
+
+    if (routeLayerRef.current) {
+      routeLayerRef.current.remove();
+      routeLayerRef.current = null;
+    }
 
     if (!currentPosition || !selectedDestination) {
-      renderer.setDirections({ routes: [] });
       setRouteSummary(null);
       return;
     }
 
-    const directions = new maps.DirectionsService();
-    directions.route(
-      {
-        origin: currentPosition,
-        destination: selectedDestination.location,
-        travelMode: maps.TravelMode[travelMode],
-        drivingOptions:
-          travelMode === "DRIVING"
-            ? {
-                departureTime: new Date(),
-                trafficModel: "bestguess",
-              }
-            : undefined,
-      },
-      (result: any, status: string) => {
-        if (status !== "OK" || !result?.routes?.[0]?.legs?.[0]) {
-          renderer.setDirections({ routes: [] });
-          setRouteSummary(null);
-          return;
-        }
+    let cancelled = false;
+    const profile = travelModeToOsrmProfile(travelMode);
+    const speedKmH: Record<string, number> = { DRIVING: 40, WALKING: 5, BICYCLING: 15, TRANSIT: 25 };
 
-        renderer.setDirections(result);
-        const leg = result.routes[0].legs[0];
-        const baseSeconds = leg.duration?.value ?? Math.max(60, (selectedDestination.distanceKm ?? 1) * 180);
-        const trafficSeconds =
-          typeof leg.duration_in_traffic?.value === "number"
-            ? leg.duration_in_traffic.value
-            : travelMode === "DRIVING"
-              ? Math.round(baseSeconds * estimateTrafficMultiplier())
-              : baseSeconds;
+    void fetchOsrmRoute(currentPosition, selectedDestination.location, profile).then((route) => {
+      if (cancelled || !mapRef.current) return;
 
-        const bounds = new maps.LatLngBounds();
-        bounds.extend(currentPosition);
-        bounds.extend(selectedDestination.location);
-        map.fitBounds(bounds, 64);
-
-        setRouteSummary({
-          distanceText: leg.distance?.text ?? `${(selectedDestination.distanceKm ?? 0).toFixed(1)} km`,
-          durationText: leg.duration?.text ?? secondsToReadable(baseSeconds),
-          trafficText:
-            travelMode === "DRIVING"
-              ? secondsToReadable(trafficSeconds)
-              : leg.duration?.text ?? secondsToReadable(baseSeconds),
-          modeLabel: travelModeLabel(travelMode),
-          sourceLabel: leg.duration_in_traffic ? "Google traffic" : travelMode === "DRIVING" ? "Rush-hour heuristic" : "Route duration",
-        });
+      if (routeLayerRef.current) {
+        routeLayerRef.current.remove();
+        routeLayerRef.current = null;
       }
-    );
+
+      if (!route) {
+        const distKm = haversineKm(currentPosition, selectedDestination.location);
+        const durationSec = (distKm / (speedKmH[travelMode] ?? 40)) * 3600;
+        const trafficMultiplier = travelMode === "DRIVING" ? estimateTrafficMultiplier() : 1;
+        const line = L.polyline(
+          [
+            [currentPosition.lat, currentPosition.lng],
+            [selectedDestination.location.lat, selectedDestination.location.lng],
+          ],
+          { color: "#0f8b80", weight: 4, opacity: 0.7, dashArray: "8 8" }
+        ).addTo(mapRef.current);
+        routeLayerRef.current = line;
+        mapRef.current.fitBounds(line.getBounds(), { padding: [40, 40] });
+        setRouteSummary({
+          distanceText: `${distKm.toFixed(1)} km`,
+          durationText: secondsToReadable(durationSec),
+          trafficText: travelMode === "DRIVING" ? secondsToReadable(durationSec * trafficMultiplier) : secondsToReadable(durationSec),
+          modeLabel: travelModeLabel(travelMode),
+          sourceLabel: "Straight-line estimate (routing unavailable)",
+        });
+        return;
+      }
+
+      const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+      const line = L.polyline(coords, { color: "#0f8b80", weight: 6, opacity: 0.95 }).addTo(mapRef.current);
+      routeLayerRef.current = line;
+      mapRef.current.fitBounds(line.getBounds(), { padding: [40, 40] });
+
+      const distKm = route.distanceMeters / 1000;
+      const durationSec = route.durationSeconds;
+      const trafficMultiplier = travelMode === "DRIVING" ? estimateTrafficMultiplier() : 1;
+      setRouteSummary({
+        distanceText: `${distKm.toFixed(1)} km`,
+        durationText: secondsToReadable(durationSec),
+        trafficText: travelMode === "DRIVING" ? secondsToReadable(durationSec * trafficMultiplier) : secondsToReadable(durationSec),
+        modeLabel: travelModeLabel(travelMode),
+        sourceLabel: travelMode === "DRIVING" ? "OSRM route + rush-hour heuristic" : "OSRM route",
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentPosition, selectedDestination, travelMode]);
 
   useEffect(() => {
-    const maps = mapsRef.current;
-    const map = mapRef.current;
-    if (!maps || !map || !selectedDestination) {
+    if (!selectedDestination) {
       setSelectedPlaceDetails(null);
       return;
     }
-
-    if (selectedDestination.kind === "doctor") {
-      setSelectedPlaceDetails({
-        address: selectedDestination.address,
-        mapsUrl: `https://www.google.com/maps/search/?api=1&query=${selectedDestination.location.lat},${selectedDestination.location.lng}`,
-      });
-      return;
-    }
-
-    if (!selectedDestination.placeId) {
-      setSelectedPlaceDetails({ address: selectedDestination.address });
-      return;
-    }
-
-    const service = new maps.places.PlacesService(map);
-    service.getDetails(
-      {
-        placeId: selectedDestination.placeId,
-        fields: [
-          "formatted_address",
-          "formatted_phone_number",
-          "website",
-          "rating",
-          "user_ratings_total",
-          "opening_hours",
-          "url",
-        ],
-      },
-      (place: any, status: string) => {
-        if (status !== maps.places.PlacesServiceStatus.OK || !place) {
-          setSelectedPlaceDetails({ address: selectedDestination.address });
-          return;
-        }
-
-        setSelectedPlaceDetails({
-          address: place.formatted_address || selectedDestination.address,
-          phone: place.formatted_phone_number || undefined,
-          website: place.website || undefined,
-          rating: typeof place.rating === "number" ? place.rating : undefined,
-          userRatingsTotal: typeof place.user_ratings_total === "number" ? place.user_ratings_total : undefined,
-          openingHours: place.opening_hours?.weekday_text ?? undefined,
-          mapsUrl: place.url || undefined,
-        });
-      }
-    );
+    const osmUrl =
+      `https://www.openstreetmap.org/?mlat=${selectedDestination.location.lat}` +
+      `&mlon=${selectedDestination.location.lng}&zoom=17`;
+    setSelectedPlaceDetails({
+      address: selectedDestination.address,
+      mapsUrl: osmUrl,
+    });
   }, [selectedDestination]);
 
   useEffect(() => {
-    const maps = mapsRef.current;
-    const map = mapRef.current;
-    if (!maps || !map || !currentPosition || destinations.length === 0) {
+    if (!currentPosition || destinations.length === 0) {
       setCommuteSummaries([]);
       return;
     }
 
-    const service = new maps.DistanceMatrixService();
-    const commuteTargets = destinations.slice(0, 8);
-    service.getDistanceMatrix(
-      {
-        origins: [currentPosition],
-        destinations: commuteTargets.map((destination) => destination.location),
-        travelMode: maps.TravelMode[travelMode],
-        unitSystem: maps.UnitSystem.METRIC,
-        drivingOptions:
-          travelMode === "DRIVING"
-            ? {
-                departureTime: new Date(),
-                trafficModel: "bestguess",
-              }
-            : undefined,
-      },
-      (response: any, status: string) => {
-        if (status !== "OK" || !response?.rows?.[0]?.elements) {
-          setCommuteSummaries([]);
-          return;
-        }
+    const speedKmH: Record<string, number> = { DRIVING: 40, WALKING: 5, BICYCLING: 15, TRANSIT: 25 };
+    const speed = speedKmH[travelMode] ?? 40;
+    const trafficMultiplier = travelMode === "DRIVING" ? estimateTrafficMultiplier() : 1;
 
-        const elements = response.rows[0].elements as any[];
-        const summaries = commuteTargets
-          .map((destination, index) => {
-            const element = elements[index];
-            if (!element || element.status !== "OK") {
-              return null;
-            }
+    const summaries = destinations
+      .slice(0, 8)
+      .filter((destination) => destination.distanceKm !== null)
+      .map((destination) => {
+        const distKm = destination.distanceKm!;
+        const durationSec = (distKm / speed) * 3600;
+        const trafficSec = durationSec * trafficMultiplier;
+        return {
+          id: destination.id,
+          name: destination.name,
+          kind: destination.kind,
+          distanceText: `${distKm.toFixed(1)} km`,
+          durationText: secondsToReadable(durationSec),
+          trafficText: travelMode === "DRIVING" ? secondsToReadable(trafficSec) : secondsToReadable(durationSec),
+        };
+      });
 
-            return {
-              id: destination.id,
-              name: destination.name,
-              kind: destination.kind,
-              distanceText: element.distance?.text ?? "--",
-              durationText: element.duration?.text ?? "--",
-              trafficText:
-                travelMode === "DRIVING"
-                  ? element.duration_in_traffic?.text ?? element.duration?.text ?? "--"
-                  : element.duration?.text ?? "--",
-            };
-          })
-          .filter((item): item is CommuteSummary => Boolean(item));
-
-        setCommuteSummaries(summaries);
-      }
-    );
+    setCommuteSummaries(summaries);
   }, [currentPosition, destinations, travelMode]);
 
   const submitFeedback = async (
@@ -1168,25 +1048,17 @@ export default function NbaDashboardPage() {
 
   const handleLocationSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const maps = mapsRef.current;
     const map = mapRef.current;
-    if (!maps || !map || !searchQuery.trim()) return;
+    if (!map || !searchQuery.trim()) return;
 
-    const geocoder = new maps.Geocoder();
-    geocoder.geocode({ address: searchQuery.trim() }, (results: any[], status: string) => {
-      if (status !== "OK" || !results?.[0]?.geometry?.location) {
-        setStatus("Location search failed");
+    void geocodeAddress(searchQuery.trim()).then((result) => {
+      if (!result) {
+        setStatus("Location not found — try a more specific address or city name");
         return;
       }
-
-      const location = {
-        lat: results[0].geometry.location.lat(),
-        lng: results[0].geometry.location.lng(),
-      };
-      map.panTo(location);
-      map.setZoom(13);
-      setSearchAnchor(location);
-      setStatus(`Showing map results for ${results[0].formatted_address}`);
+      map.setView([result.lat, result.lng], 13);
+      setSearchAnchor({ lat: result.lat, lng: result.lng });
+      setStatus(`Showing results for: ${result.displayName}`);
     });
   };
 
@@ -1289,7 +1161,7 @@ export default function NbaDashboardPage() {
           <div className="pn-map-head">
             <div>
               <h2>Field Map</h2>
-              <p className="muted">Live MR GPS, doctor markers, nearby pharmacies, and route guidance.</p>
+              <p className="muted">Live MR GPS on OpenStreetMap, doctor markers, nearby pharmacies via Overpass, and OSRM route guidance.</p>
             </div>
             <div className="chips">
               <Pill>{currentPosition ? "MR location active" : "MR location inactive"}</Pill>
@@ -1332,9 +1204,9 @@ export default function NbaDashboardPage() {
                 <option value="30">30 km</option>
               </select>
             </Field>
-            <label className="pn-check pn-inline-check">
-              <input type="checkbox" checked={showTrafficLayer} onChange={(event) => setShowTrafficLayer(event.target.checked)} />
-              Traffic
+            <label className="pn-check pn-inline-check" title="Traffic overlay not available with free OSM tiles">
+              <input type="checkbox" checked={false} disabled />
+              Traffic (N/A)
             </label>
             <Button
               type="button"
@@ -1342,8 +1214,7 @@ export default function NbaDashboardPage() {
               onClick={() => {
                 const map = mapRef.current;
                 if (!map) return;
-                map.panTo(regionCenter);
-                map.setZoom(12);
+                map.setView([regionCenter.lat, regionCenter.lng], 12);
               }}
             >
               Focus Region
@@ -1463,7 +1334,7 @@ export default function NbaDashboardPage() {
                       {selectedPlaceDetails.mapsUrl && (
                         <p>
                           <a href={selectedPlaceDetails.mapsUrl} target="_blank" rel="noreferrer">
-                            Open in Google Maps
+                            Open in OpenStreetMap
                           </a>
                         </p>
                       )}
@@ -1530,7 +1401,7 @@ export default function NbaDashboardPage() {
             ))}
             {destinations.length === 0 && (
               <p className="muted">
-                No mapped doctors or pharmacies yet. Ensure doctor latitude and longitude exist, then add a Google Maps key.
+                No mapped doctors or pharmacies yet. Ensure doctor latitude and longitude coordinates exist in the system.
               </p>
             )}
             {destinations.length > 0 && filteredDestinations.length === 0 && (
