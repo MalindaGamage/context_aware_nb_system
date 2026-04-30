@@ -453,4 +453,4 @@ Research work still required outside the codebase:
 - Validate frontend, API, and recommender changes before rebuilding Docker images.
 
 ## Project Demonstration Video
-[![Watch the demo](https://img.youtube.com/vi/InatFmVHlqw&t=289s/0.jpg)](https://www.youtube.com/watch?v=InatFmVHlqw&t=289s)
+[![Watch the demo](https://img.youtube.com/vi/InatFmVHlqw/0.jpg)](https://www.youtube.com/watch?v=InatFmVHlqw)
